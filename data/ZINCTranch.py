@@ -46,6 +46,7 @@ class ZINCDataset(Dataset):
         smi = self.smi[idx]
 
         props = np.zeros(self.num_classes)
+        no_zscore = np.zeros(self.num_classes)
         if self.stats != None:
             #we want to zscore
             for i, entry in enumerate(self.prop_list):
@@ -57,10 +58,12 @@ class ZINCDataset(Dataset):
             for i, entry in enumerate(self.prop_list):
                 prop_value = self.tranch[smi][entry]
                 props[i] = prop_value
+                no_zscore[i] = prop_value
 
         mol = read_smiles(smi)
         data = from_networkx_custom(mol)
 
+        data.no_zscore_props = no_zscore
         data.y = torch.Tensor([props])
 
         #place node features
@@ -118,7 +121,7 @@ class Scattering(object):
         props = sample.y
         to_return = self.model(sample)
         
-        return to_return[0].detach(), torch.tensor([float(sample.time)])
+        return to_return[0][0].detach(), sample.y[0]
 
 
 def from_networkx_custom(G):

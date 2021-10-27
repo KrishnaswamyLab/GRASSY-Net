@@ -1,5 +1,5 @@
 from models.GRASSY_model import GRASSY
-from data.ZINCTranch import ZINCTranch, Scattering
+from data.ZINCTranch import ZINCDataset, Scattering
 
 from argparse import ArgumentParser
 import datetime
@@ -63,7 +63,7 @@ if __name__ == '__main__':
     
     TRANCH = "P14416_BindingDB_train"
     TRANCH_NAME = 'P14416'
-    full_dataset = ZINCTranch(f'../final_tranches/{TRANCH}_subset.npy', prop_stat_dict=f'../final_tranches/{TRANCH}_subset_stats.npy',
+    full_dataset = ZINCDataset(f'../final_tranches/{TRANCH}_subset.npy', prop_stat_dict=f'../final_tranches/{TRANCH}_subset_stats.npy',
                                 transform=Scattering(scatter_model_name=f'../LEGS/final_models/{TRANCH_NAME}.npy'))
 
     if not kl_div:
@@ -138,7 +138,7 @@ if __name__ == '__main__':
 
 
 
-    no_transform_dataset = ZINCTranch(f'../final_tranches/{TRANCH}_subset.npy')
+    no_transform_dataset = ZINCDataset(f'../final_tranches/{TRANCH}_subset.npy')
 
     scat_mom_list = []
     prop = []
