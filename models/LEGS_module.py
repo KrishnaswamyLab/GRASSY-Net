@@ -70,7 +70,7 @@ def scatter_moments(graph, batch_indices, moments_returned=4):
             )
 
         # skew: 3rd moment divided by cubed standard deviation (sd = sqrt variance), with correction for division by zero (inf -> 0)
-        skew = m(3)# / (variance ** (3 / 2))  -- using unnormalized moments
+        skew = m(3) / (variance ** (3 / 2)) 
         skew[
             skew > 1000000000000000
         ] = 0  # multivalued tensor division by zero produces inf
@@ -83,7 +83,7 @@ def scatter_moments(graph, batch_indices, moments_returned=4):
             )
 
         # kurtosis: fourth moment, divided by variance squared. Using Fischer's definition to subtract 3 (default in scipy)
-        kurtosis = m(4) # / (variance ** 2) - 3 --using unnormalized moments
+        kurtosis = m(4) / (variance ** 2) - 3 
         kurtosis[kurtosis > 1000000000000000] = -3
         kurtosis[kurtosis != kurtosis] = -3
         if moments_returned >= 4:
