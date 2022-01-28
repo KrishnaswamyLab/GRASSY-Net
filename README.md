@@ -1,3 +1,3 @@
 #### GRASSY-Net
 
-Generate molecules using TorchAF for comparison.
+Generate autoencoder without geometric scattering.
