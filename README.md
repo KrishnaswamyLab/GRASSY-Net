@@ -1,1 +1,3 @@
-# GRASSY-Net
+#### GRASSY-Net
+
+Generate molecules using TorchAF for comparison.
