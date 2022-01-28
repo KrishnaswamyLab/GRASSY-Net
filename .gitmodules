@@ -1,0 +1,3 @@
+[submodule "Implementation-MolGAN-PyTorch"]
+	path = Implementation-MolGAN-PyTorch
+	url = https://github.com/ZhenyueQin/Implementation-MolGAN-PyTorch
