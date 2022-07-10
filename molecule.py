@@ -1,9 +1,8 @@
-import math
-import warnings
+import os, math, warnings
 
-from matplotlib import pyplot as plt
 from rdkit import Chem, RDLogger
 from rdkit.Chem.Scaffolds import MurckoScaffold
+
 import torch
 from torch_scatter import scatter_add, scatter_min, scatter_max
 
@@ -11,9 +10,6 @@ from torchdrug import utils
 from torchdrug.data import constant, Graph, PackedGraph
 from torchdrug.core import Registry as R
 from torchdrug.data.rdkit import draw
-
-plt.switch_backend("agg")
-
 
 class Molecule(Graph):
     """
