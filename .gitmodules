@@ -1,3 +1,0 @@
-[submodule "mol2vec"]
-	path = mol2vec
-	url = git@github.com:samoturk/mol2vec.git
