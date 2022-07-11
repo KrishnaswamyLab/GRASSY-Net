@@ -17,14 +17,14 @@ import hgraph
 from hgraph import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
+print("Device: ", device)
 
 class Args():
     def __init__(self):
-        self.vocab = 'data/chembl/vocab.txt'
+        self.vocab = 'ZINC_FBAB_vocab.txt'
         self.atom_vocab = common_atom_vocab
-        self.model = 'ckpt/chembl-pretrained/model.ckpt'
-        self.seed = 7
+        self.model = 'ckpt/ZINC-FBAB-pretrained/model.ckpt.1500'
+        self.seed = 13
         self.nsample = 100
         self.rnn_type = 'LSTM'
         self.hidden_size = 250
@@ -39,7 +39,7 @@ class Args():
 
 args = Args()
 
-vocab = [x.strip("\r\n ").split() for x in open("data/chembl/vocab.txt")]
+vocab = [x.strip("\r\n ").split() for x in open("ZINC_FBAB_vocab.txt")]
 args.vocab = PairVocab(vocab, cuda=True)
 
 model = HierVAE(args).to(device)
@@ -64,3 +64,18 @@ print ("{} valid molecules".format(len(nmols_smiles)))
 
 nmols_smiles_unique = list(OrderedDict.fromkeys(nmols_smiles))
 print ("{} unique valid molecules".format(len(nmols_smiles_unique)))
+
+train_smi = []
+with open("../datasets/FBAB.txt",'r') as f:
+    for line in f:
+	    train_smi.append(line.strip())
+
+nmols_smiles_novel = list()
+for smi in nmols_smiles_unique:
+    if smi not in train_smi:
+        nmols_smiles_novel.append(smi)
+print ("{} novel valid molecules".format(len(nmols_smiles_novel)))
+
+with open('ZINC_FBAB_gen.txt', 'w') as f:
+    for smi in list(nmols_smiles_novel):
+        f.write(f"{smi}\n")

@@ -30,6 +30,8 @@ Hierarchial Generation of Molecules
 
 `mkdir ckpt/ZINC-FBAB-pretrained`
 
-`python train_generator.py --train train_processed/ --vocab ./ZINC_FBAB_vocab.txt --save_dir ckpt/ZINC-FBAB-pretrained`
+`python train_generator.py --train train_processed/ --vocab ./ZINC_FBAB_vocab.txt --save_dir ckpt/ZINC-FBAB-pretrained --save_iter 500 --seed 1337`
 
-`python generate.py --vocab ./ZINC_FBAB_vocab.txt --model ckpt/ZINC-FBAB-pretrained/model.ckpt --nsample 100`
+##### Molecule Generation
+
+`python generate.py --vocab ./ZINC_FBAB_vocab.txt --model ./ckpt/ZINC-FBAB-pretrained/model.ckpt.1500 --nsample 100 > ZINC_FBAB_gen.txt`
