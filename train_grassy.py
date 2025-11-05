@@ -37,13 +37,19 @@ if __name__ == '__main__':
 
     parser.add_argument('--batch_size', default=100, type=int)
     parser.add_argument('--n_gpus', default=1, type=int)
-    parser.add_argument('--save_dir', default='final_logs/', type=str)
+    parser.add_argument('--save_dir', default='scripts/final_logs/', type=str)
 
     parser.add_argument('--GRASSY_version', default='AE+REG', type=str)
 
-    # add args from trainer
-    parser = pl.Trainer.add_argparse_args(parser)
-    # parse params 
+    # add args from trainer if available (older/newer PL versions differ)
+    try:
+        if hasattr(pl.Trainer, 'add_argparse_args'):
+            parser = pl.Trainer.add_argparse_args(parser)
+    except Exception:
+        # ignore if not available
+        pass
+
+    # parse params
     args = parser.parse_args()
 
     if args.GRASSY_version == 'AE+REG':
@@ -59,10 +65,10 @@ if __name__ == '__main__':
         kl_div = True
         reg = False
 
-    TRANCH = "P14416_BindingDB_train"
-    TRANCH_NAME = 'P14416'
-    full_dataset = ZINCDataset(f'../datasets/{TRANCH}_subset.npy', prop_stat_dict=f'../datasets/{TRANCH}_subset_stats.npy',
-                                transform=Scattering(scatter_model_name=f'./trained_models/{TRANCH_NAME}.npy'))
+    TRANCH = "FBAB"
+    TRANCH_NAME = 'FBAB'
+    full_dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy',
+                                transform=Scattering(scatter_model_name=f'scripts/trained_models/{TRANCH_NAME}.npy'))
 
     if not kl_div:
         args.beta = 0
@@ -97,7 +103,7 @@ if __name__ == '__main__':
             verbose=True,
             mode='min'
             )
-
+    # import pdb; pdb.set_trace()
     args.input_dim = len(train_set[0][0])
     args.len_epoch = len(train_loader)
     print(args.input_dim)
@@ -105,16 +111,29 @@ if __name__ == '__main__':
     # init module
     model = GRASSY(hparams=args)
 
-    # most basic trainer, uses good defaults
-    trainer = pl.Trainer.from_argparse_args(args,
-                                            max_epochs=args.n_epochs,
-                                            gpus=args.n_gpus,
-                                            callbacks=[early_stop_callback],
-                                            #logger = logger
-                                            )
+    # most basic trainer, uses good defaults. Use from_argparse_args if available, otherwise
+    # construct Trainer with essential kwargs.
+    try:
+        if hasattr(pl.Trainer, 'from_argparse_args'):
+            trainer = pl.Trainer.from_argparse_args(args,
+                                                    max_epochs=args.n_epochs,
+                                                    # gpus=args.n_gpus,
+                                                    # callbacks=[early_stop_callback],
+                                                    )
+        else:
+            trainer = pl.Trainer(max_epochs=args.n_epochs,
+                                #  gpus=args.n_gpus,
+                                #  callbacks=[early_stop_callback]
+                                 )
+    except Exception:
+        # fallback to direct construction
+        trainer = pl.Trainer(max_epochs=args.n_epochs,
+                            #  gpus=args.n_gpus,
+                            #  callbacks=[early_stop_callback]
+                             )
 
     trainer.fit(model=model,
-                train_dataloader=train_loader,
+                train_dataloaders=train_loader,
                 val_dataloaders=valid_loader,
                 )
 
@@ -132,7 +151,7 @@ if __name__ == '__main__':
     print('saving model')
     torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
 
-    no_transform_dataset = ZINCDataset(f'../datasets/{TRANCH}_subset.npy')
+    no_transform_dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy')
 
     scat_mom_list = []
     prop = []
@@ -140,13 +159,13 @@ if __name__ == '__main__':
     heavywt = []
     tpsa = []
     ringcount = []
-    ki =  []
+    # ki =  []
     
     prop.append(qed)
     prop.append(heavywt)
     prop.append(tpsa)
     prop.append(ringcount)
-    prop.append(ki)
+    # prop.append(ki)
 
     atom_percentage = []
     carbon = []
@@ -163,7 +182,7 @@ if __name__ == '__main__':
         heavywt.append(entry[1][1])
         tpsa.append(entry[1][6])
         ringcount.append(entry[1][9])
-        ki.append(entry[1][10])
+        # ki.append(entry[1][10])
 
         data = no_transform_dataset[index]
 

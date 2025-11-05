@@ -1,6 +1,6 @@
 import numpy as np
 
-tranch = "JBCD_subset.npy"
+tranch = "fields_1.npy"
 tranch_name, _ = tranch.split('.')
 
 tranch_dict = np.load(tranch, allow_pickle=True).item()

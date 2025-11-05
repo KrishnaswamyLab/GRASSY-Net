@@ -8,12 +8,12 @@ import torch.utils
 from torch.nn import Linear
 from torch_scatter import scatter_mean
 from torch_geometric.nn import MessagePassing
-from torch_geometric.data import DataLoader
+# from torch_geometric.data import DataLoader
+from torch_geometric.loader import DataLoader
 from torch_geometric.utils import degree
 from torch_geometric.transforms import Compose
 from torch_geometric.utils import to_networkx, from_networkx
 from torch_geometric.datasets import TUDataset
-
 from models.LEGS_module import *
 from datasets.load_ZINC_tranche import ZINCDataset
 
@@ -145,7 +145,7 @@ class EarlyStopping(object):
 
         return False
 
-	def _init_is_better(self, mode, min_delta, percentage):
+    def _init_is_better(self, mode, min_delta, percentage):
 
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
@@ -183,13 +183,14 @@ def evaluate(model, loss_fn, train_ds, test_ds, val_ds):
 
 def train_model(out_file):
 
-    TRANCH = "BBAB"
-    TRANCH_NAME = 'BBAB'
-    dataset = ZINCDataset(f'../datasets/{TRANCH}_subset.npy', 
-			prop_stat_dict=f'../datasets/{TRANCH}_subset_stats.npy', include_ki=False)
-    
+    TRANCH = "FBAB"
+    TRANCH_NAME = 'FBAB'
+    dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
+			prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
+    # dataset = ZINCDataset(f'datasets/fields_1.npy', include_ki=False)
+    # import pdb; pdb.set_trace()
     train_ds, val_ds, test_ds = split_dataset(dataset)
-    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True, num_workers=8)
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 
     model = TSNet(
         dataset.num_node_features,
@@ -199,7 +200,7 @@ def train_model(out_file):
 
     model = model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     loss_fn = torch.nn.MSELoss()
     early_stopper = EarlyStopping(mode = 'max', patience=5, percentage=True)
 
@@ -208,10 +209,10 @@ def train_model(out_file):
 
     model.train()
 
-	for epoch in trange(1, 80 + 1):
+    for epoch in trange(1, 80 + 1):
 
         for data in train_loader:
-
+            # import pdb; pdb.set_trace()
             optimizer.zero_grad()
             data = data.to(device)
             out, sc = model(data)
@@ -236,4 +237,4 @@ def train_model(out_file):
     print('saving scatter model')
     torch.save(model.scatter.state_dict(), str(out_file) + f"{TRANCH_NAME}.npy")
 
-train_model('./trained_models/')
+train_model('scripts/trained_models/')

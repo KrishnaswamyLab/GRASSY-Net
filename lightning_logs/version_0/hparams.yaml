@@ -1,0 +1,12 @@
+input_dim: 440
+bottle_dim: 25
+hidden_dim: 100
+learning_rate: 0.001
+alpha: 0.01
+beta: 0
+n_epochs: 100
+len_epoch: 20
+batch_size: 100
+n_gpus: 1
+save_dir: scripts/final_logs/
+GRASSY_version: AE+REG

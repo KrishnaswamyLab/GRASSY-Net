@@ -8,7 +8,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 from torch.utils.data import Dataset, DataLoader
-
+from torch_geometric.data import Data
 from torchvision import transforms, utils
 
 import torch_geometric.data
@@ -18,13 +18,21 @@ from torch_geometric import data
 from pysmiles import read_smiles
 
 from models.LEGS_module import Scatter
+from rdkit import Chem
+from torch_geometric.utils import from_networkx
+
+def read_smiles_rdkit(smi):
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES: {smi}")
+    return nx.Graph(Chem.rdmolops.GetAdjacencyMatrix(mol))
 
 
 class ZINCDataset(Dataset):
 
     """ZINC Tranch data"""
 
-    def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=True):
+    def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
         self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount']
@@ -69,12 +77,19 @@ class ZINCDataset(Dataset):
                 props[i] = prop_value
                 no_zscore[i] = prop_value
 
-        mol = read_smiles(smi)
-        data = from_networkx_custom(mol)
+        # mol = read_smiles(smi)
+        # mol = read_smiles_rdkit(smi)
+        # data = from_networkx_custom(mol)
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES: {smi}")
 
-        data.no_zscore_props = no_zscore
-        data.y = torch.Tensor([props])
+        data = mol_to_pyg(mol)
 
+        # store properties as proper float tensors (shape [1, num_classes]) to avoid slow list->tensor conversions
+        data.no_zscore_props = torch.tensor(no_zscore, dtype=torch.float32)
+        data.y = torch.tensor([props], dtype=torch.float32)
+        # import pdb; pdb.set_trace()
         #place node features
         node_feats = []
     
@@ -109,7 +124,7 @@ class ZINCDataset(Dataset):
             node_feats.append(node_feat)
 
         data.x = torch.Tensor(node_feats)
-
+        # import pdb; pdb.set_trace()
         if self.transform: 
             return self.transform(data)
         else:
@@ -136,6 +151,51 @@ class Scattering(object):
         
         return to_return[0][0].detach(), sample.y[0]
 
+
+
+def mol_to_pyg(mol):
+    """
+    Converts an RDKit molecule to a PyTorch Geometric Data object.
+    """
+
+    # --- 1️⃣ Extract element symbols ---
+    elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
+
+    # --- 2️⃣ Create edge index (both directions for undirected graphs) ---
+    edge_index = []
+    edge_weight = []
+
+    for bond in mol.GetBonds():
+        i = bond.GetBeginAtomIdx()
+        j = bond.GetEndAtomIdx()
+        edge_index.append((i, j))
+        edge_index.append((j, i))
+        edge_weight.append(bond.GetBondTypeAsDouble())
+        edge_weight.append(bond.GetBondTypeAsDouble())
+
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
+
+    # --- 3️⃣ One-hot encode atom types ---
+    # unique_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'Br', 'I', 'P', 'H']
+    # node_feats = []
+    # for e in elements:
+    #     feat = [1.0 if e == u else 0.0 for u in unique_atoms]
+    #     node_feats.append(feat)
+    # x = torch.tensor(node_feats, dtype=torch.float32)
+
+    # --- 4️⃣ Assemble Data object ---
+    data = Data(
+        # x=x,
+        edge_index=edge_index,
+        weight=edge_weight,
+        num_nodes=mol.GetNumAtoms(),
+    )
+
+    # --- 5️⃣ Store element labels for convenience ---
+    data.element = elements
+
+    return data
 
 def from_networkx_custom(G):
 

@@ -14,14 +14,20 @@ class GRASSY(pl.LightningModule):
     def __init__(self, hparams):
 
         super(GRASSY, self).__init__()
+        # use Lightning helper to save hyperparameters (handles different PL versions)
+        try:
+            # if hparams is an argparse Namespace this will save its fields
+            self.save_hyperparameters(hparams)
+        except Exception:
+            # fallback: attach a copy
+            self.hparams = hparams
+
+        self.alpha = self.hparams.alpha
+        self.beta = self.hparams.beta
         
-        self.hparams = hparams
-        self.alpha = hparams.alpha
-        self.beta = hparams.beta
-        
-        self.input_dim = hparams.input_dim
-        self.bottle_dim = hparams.bottle_dim
-        self.hidden_dim = hparams.hidden_dim
+        self.input_dim = self.hparams.input_dim
+        self.bottle_dim = self.hparams.bottle_dim
+        self.hidden_dim = self.hparams.hidden_dim
 
 
         self.fc11 = nn.Linear(self.input_dim, self.hidden_dim)
@@ -38,7 +44,7 @@ class GRASSY(pl.LightningModule):
 
         # property prediction
         self.regfc1 = nn.Linear(self.bottle_dim, 20)
-        self.regfc2 = nn.Linear(20, 11)
+        self.regfc2 = nn.Linear(20, 10)
 
         self.loss_list = []
         
@@ -178,6 +184,7 @@ class GRASSY(pl.LightningModule):
         recon_loss = nn.MSELoss()(x_hat.flatten(), x.flatten())
         
         # regression loss
+        # import pdb; pdb.set_trace()
         reg_loss = nn.MSELoss()(y_hat.reshape(-1), y.reshape(-1)) 
         reg_loss = self.alpha * reg_loss.mean()
 
@@ -198,23 +205,23 @@ class GRASSY(pl.LightningModule):
 
         return log_losses
 
-    def validation_epoch_end(self, outputs):
+    # def on_validation_epoch_end(self, outputs):
 
-        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        avg_reconloss = torch.stack([x['val_recon_loss'] for x in outputs]).mean()
-        avg_regloss = torch.stack([x['val_pred_loss'] for x in outputs]).mean()
-        avg_klloss = torch.stack([x['val_kl_loss'] for x in outputs]).mean()
+    #     avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+    #     avg_reconloss = torch.stack([x['val_recon_loss'] for x in outputs]).mean()
+    #     avg_regloss = torch.stack([x['val_pred_loss'] for x in outputs]).mean()
+    #     avg_klloss = torch.stack([x['val_kl_loss'] for x in outputs]).mean()
 
-        tensorboard_logs = {'val_loss': avg_loss,
-                            'val_avg_recon_loss': avg_reconloss,
-                            'val_avg_pred_loss':avg_regloss,
-                            'val_avg_kl_loss':avg_klloss
-                            }
+    #     tensorboard_logs = {'val_loss': avg_loss,
+    #                         'val_avg_recon_loss': avg_reconloss,
+    #                         'val_avg_pred_loss':avg_regloss,
+    #                         'val_avg_kl_loss':avg_klloss
+    #                         }
 
-        self.log('val_loss', avg_loss.detach())
-        print(avg_loss.detach())
+    #     self.log('val_loss', avg_loss.detach())
+    #     print(avg_loss.detach())
 
-        return {'val_loss': avg_loss, 'log': tensorboard_logs}
+    #     return {'val_loss': avg_loss, 'log': tensorboard_logs}
 
 
     def configure_optimizers(self):
