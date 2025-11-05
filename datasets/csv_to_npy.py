@@ -95,7 +95,10 @@ def compute_props(mol):
 
 def csv_to_npy(input_csv, smiles_col='smiles', output_path='tranche_subset.npy', ki_col=None, smiles_header_case_insensitive=True):
     df = pd.read_csv(input_csv)
-
+    for smi in df["SMILES"].head(10):
+        mol = Chem.MolFromSmiles(str(smi))
+        print(smi, "=>", mol.GetNumAtoms(), "atoms,", mol.GetNumBonds(), "bonds")
+    # import pdb; pdb.set_trace()
     # try case-insensitive lookup for smiles column
     if smiles_header_case_insensitive:
         cols_lower = {c.lower(): c for c in df.columns}

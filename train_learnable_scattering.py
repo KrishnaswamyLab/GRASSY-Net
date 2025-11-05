@@ -183,12 +183,12 @@ def evaluate(model, loss_fn, train_ds, test_ds, val_ds):
 
 def train_model(out_file):
 
-    TRANCH = "FBAB"
-    TRANCH_NAME = 'FBAB'
-    dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
-			prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
-    # dataset = ZINCDataset(f'datasets/fields_1.npy', include_ki=False)
-    # import pdb; pdb.set_trace()
+    # TRANCH = "FBAB"
+    # TRANCH_NAME = 'FBAB'
+    # dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
+	# 		prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
+    dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
+    import pdb; pdb.set_trace()
     train_ds, val_ds, test_ds = split_dataset(dataset)
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 
@@ -217,6 +217,7 @@ def train_model(out_file):
             data = data.to(device)
             out, sc = model(data)
             loss = loss_fn(out, data.y)
+            import pdb; pdb.set_trace()
             loss.backward()
             optimizer.step()
 
@@ -235,6 +236,7 @@ def train_model(out_file):
     print("Results compiled:",results_compiled)
    
     print('saving scatter model')
-    torch.save(model.scatter.state_dict(), str(out_file) + f"{TRANCH_NAME}.npy")
+    # torch.save(model.scatter.state_dict(), str(out_file) + f"{TRANCH_NAME}.npy")
+    torch.save(model.scatter.state_dict(), str(out_file) + f"fields_1_trained.npy")
 
 train_model('scripts/trained_models/')
