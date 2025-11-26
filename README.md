@@ -4,6 +4,14 @@ A novel representation-first approach to molecular graph generation.
 
 #### GRASSY-Net — Usage: data preparation → learnable scattering → GRASSY training → latent visualization
 
+### Environment Creation
+
+```
+uv venv
+uv sync
+uv pip install torch_geometric
+uv pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
+```
 Prereqs
 - Python 3.8+
 - numpy, pandas, scikit-learn (or umap-learn), matplotlib
