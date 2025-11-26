@@ -23,6 +23,7 @@ for entry in list_dict.keys():
     prop_list = list_dict[entry]
     try:
         mean = np.mean(prop_list)
+        
     except:
         print(f'Exception on property: {entry}')
         raise Exception
@@ -32,4 +33,4 @@ for entry in list_dict.keys():
     stat['std'] = std
     stats_dict[entry] = stat
 
-np.save(tranch_name + '_stats.npy', stats_dict)
+np.save(tranch_name.split['.'][0] + '_stats.npy', stats_dict)
