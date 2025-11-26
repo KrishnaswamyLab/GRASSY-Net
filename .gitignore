@@ -1,3 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Model checkpoints and weights
+*.pt
+*.pth
+*.ckpt
+*.bin
+checkpoints/
+models/
+weights/
+
+# Datasets
+data/
+datasets/
+*.csv
+*.json
+*.parquet
+
+# Logs and outputs
+logs/
+runs/
+outputs/
+results/
+*.log
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*.swo
+*~
+
 figs/
 lightning_logs/
 TRAINING_DATA/
+
+scripts/download_omol.sh
