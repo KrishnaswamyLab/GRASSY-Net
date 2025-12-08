@@ -24,7 +24,12 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         scattering = noisy_data['y_t']  # [B, 440] scattering passed as y
         
         X_pred, E_pred = self.denoiser(X_t, E_t, node_mask, t, scattering, uncond=unconditioned)
-        return PlaceHolder(X=X_pred, E=E_pred, y=None).mask(node_mask)
+        E_pred = (E_pred + E_pred.transpose(1, 2)) / 2
+        # Manual masking (avoids symmetry assertion)
+        X_pred = X_pred * node_mask.unsqueeze(-1)
+        mask_2d = node_mask.unsqueeze(1) * node_mask.unsqueeze(2)
+        E_pred = E_pred * mask_2d.unsqueeze(-1)
+        return PlaceHolder(X=X_pred, E=E_pred, y=None)
     
     def compute_loss(self, noisy_data, true_X, true_E, lw_X, lw_E, unconditioned=False):
         pred = self.forward(noisy_data, unconditioned=unconditioned)
@@ -45,14 +50,20 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         loss_E = F.cross_entropy(flat_pred_E, torch.argmax(flat_true_E, dim=-1)) if true_E.numel() > 0 else 0.0
         loss = lw_X * loss_X + lw_E * loss_E
         return loss, loss_X, loss_E
+    def initialize_parameters(self):
+        """Required by torch-molecule's fit()."""
+        pass
 
 
 class ScatteringGraphDIT(GraphDITMolecularGenerator):
     """GraphDIT with scattering moment conditioning via cross-attention."""
     
     def __init__(self, **kwargs):
-        kwargs['input_dim_y'] = 440  # scattering moments dimension
         super().__init__(**kwargs)
+
+    def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
+        """Bypass validation for 440-D scattering - just return as-is."""
+        return X, y
     
     def _initialize_model(self, model_class, checkpoint=None):
         """Override to use ScatteringDenoiser instead of Transformer."""
@@ -61,6 +72,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             hidden_size=self.hidden_size,
             depth=self.num_layer,
             num_heads=self.num_head,
+            Xdim=self.input_dim_X,
+            Edim=self.input_dim_E,
         )
         self.model = ScatteringTransformerAdapter(denoiser).to(self.device)
         return self.model
@@ -89,10 +102,27 @@ if __name__ == "__main__":
     df = pd.read_csv(f"{args.data_dir}/{args.csv_file}")
     smiles = df[args.smiles_col].tolist()
     scattering = np.load(f"{args.data_dir}/{args.scatter_file}")
+
+    # Add this after loading data, before model.fit()
+    from rdkit import Chem
+
+    valid_smiles = []
+    valid_scatter = []
+    for i, smi in enumerate(smiles):
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        has_dative = any(b.GetBondType() == Chem.BondType.DATIVE for b in mol.GetBonds())
+        if not has_dative:
+            valid_smiles.append(smi)
+            valid_scatter.append(scattering[i])
+
+    smiles = valid_smiles
+    scattering = np.array(valid_scatter)
+    print(f"Filtered to {len(smiles)} molecules")
     
     # Train
     model = ScatteringGraphDIT(
-        max_node=args.max_node,
         hidden_size=args.hidden_size,
         num_layer=args.num_layer,
         num_head=args.num_head,

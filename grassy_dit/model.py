@@ -19,8 +19,7 @@ Dual tokenization:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_molecule.models.generation.graph_dit.layers import Attention, Mlp
-from torch_molecule.models.generation.graph_dit.model import TimestepEmbedder, OutLayer
+from torch_molecule.generator.graph_dit.transformer import AttentionWithNodeMask as Attention, MLP as Mlp, TimestepEmbedder, FinalLayer as OutLayer
 
 
 class CrossAttention(nn.Module):
@@ -131,7 +130,7 @@ class SELayerWithCrossAttention(nn.Module):
         super().__init__()
         # Self-attention
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, qk_norm=True)
+        self.attn = Attention(hidden_size, num_head=num_heads, qkv_bias=True, qk_norm=True)
         
         # Cross-attention to scattering
         self.norm_cross = nn.LayerNorm(hidden_size, elementwise_affine=False)
@@ -139,7 +138,7 @@ class SELayerWithCrossAttention(nn.Module):
         
         # MLP
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.mlp = Mlp(hidden_size, int(hidden_size * mlp_ratio))
+        self.mlp = Mlp(hidden_size, int(hidden_size * mlp_ratio), use_bn=False) # disables batch norm - might wanna add layer norm
         
         # AdaLN modulation from timestep: 6 params (shift1, scale1, gate1, shift2, scale2, gate2)
         self.adaLN = nn.Sequential(
@@ -244,4 +243,5 @@ class ScatteringDenoiser(nn.Module):
             x = block(x, c, node_mask, scatter_tokens)
         
         # Output projection
-        return self.out_layer(x, x_in, e_in, c, t, node_mask)
+        X_pred, E_pred, _ = self.out_layer(x, x_in, e_in, c, t, node_mask)
+        return X_pred, E_pred       
