@@ -187,8 +187,10 @@ def train_model(out_file):
     # TRANCH_NAME = 'FBAB'
     # dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
 	# 		prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
-    dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
-    import pdb; pdb.set_trace()
+    dataset = ZINCDataset(f'datasets/molecules.npy', prop_stat_dict=f'datasets/molecules_stats.npy', include_ki=False)
+
+    # dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
+    # import pdb; pdb.set_trace()
     train_ds, val_ds, test_ds = split_dataset(dataset)
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 
@@ -217,7 +219,7 @@ def train_model(out_file):
             data = data.to(device)
             out, sc = model(data)
             loss = loss_fn(out, data.y)
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             loss.backward()
             optimizer.step()
 

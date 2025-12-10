@@ -16,7 +16,6 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from torchvision import transforms
 
 from models.GRASSY_model import GRASSY
 from datasets.load_ZINC_tranche import ZINCDataset, Scattering

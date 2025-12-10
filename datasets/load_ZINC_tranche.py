@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 
 from torch.utils.data import Dataset, DataLoader
 from torch_geometric.data import Data
-from torchvision import transforms, utils
 
 import torch_geometric.data
 from torch_geometric import utils

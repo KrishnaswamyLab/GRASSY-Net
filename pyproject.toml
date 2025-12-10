@@ -1,0 +1,17 @@
+[project]
+name = "grassy-net"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch==2.4.0",
+    "pytorch-lightning>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.3.0",
+    "matplotlib>=3.7.0",
+    "pandas>=2.0.0",
+    "tqdm>=4.65.0",
+    "rdkit>=2025.9.1",
+    "pysmiles>=2.0.0",
+]
