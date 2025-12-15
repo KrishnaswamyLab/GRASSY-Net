@@ -1,5 +1,5 @@
-from .model import ScatteringDenoiser, ScatteringTokenizer, CrossAttention
-from .scaffold import ScaffoldSampler, create_scaffold_mask
+from .train import ScatteringGraphDIT, ScatteringTransformerAdapter
+from .model import ScatteringDenoiser
 
 __all__ = [
     'ScatteringDenoiser', 'ScatteringTokenizer', 'CrossAttention',

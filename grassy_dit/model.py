@@ -25,14 +25,20 @@ from torch_molecule.generator.graph_dit.transformer import AttentionWithNodeMask
 class CrossAttention(nn.Module):
     """Q from graph, K/V from scattering tokens."""
     
-    def __init__(self, dim, num_heads=8):
+    def __init__(self, dim, num_heads=8, qkv_bias=True, qk_norm=True):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.q = nn.Linear(dim, dim)
-        self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim)
-        self.proj = nn.Linear(dim, dim)
+        self.qk_norm = qk_norm
+        
+        self.q = nn.Linear(dim, dim, bias=qkv_bias) # graph tokens -> query
+        self.k = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> key
+        self.v = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> value
+        self.proj = nn.Linear(dim, dim) # output projection
+
+        if qk_norm:
+            self.q_norm = nn.LayerNorm(self.head_dim)
+            self.k_norm = nn.LayerNorm(self.head_dim)
 
     def forward(self, x, context):
         B, N, D = x.shape
@@ -41,9 +47,13 @@ class CrossAttention(nn.Module):
         q = self.q(x).reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k(context).reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2)
         v = self.v(context).reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2)
+
+        if self.qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
         
-        out = F.scaled_dot_product_attention(q, k, v)
-        return self.proj(out.transpose(1, 2).reshape(B, N, D))
+        out = F.scaled_dot_product_attention(q, k, v) 
+        return self.proj(out.transpose(1, 2).reshape(B, N, D)) 
 
 
 class ScatteringTokenizer(nn.Module):
@@ -57,20 +67,20 @@ class ScatteringTokenizer(nn.Module):
     """
     
     def __init__(self, hidden_size=384, num_atom_types=10, num_levels=11, 
-                 num_moments=4, dropout=0.1):
+                 num_moments=4, dropout=0.1): # should change the default to be the actual number of atom types 
         super().__init__()
         self.num_atom_types = num_atom_types
         self.num_levels = num_levels
         self.num_moments = num_moments
         self.dropout = dropout
-        
+    
         # Total tokens = atom tokens + level tokens
-        self.num_tokens = num_atom_types + num_levels  # 10 + 11 = 21
+        self.num_tokens = num_atom_types + num_levels  # the double tokenization method discussed
         
-        # Atom tokens: each has L*M = 11*4 = 44 dims
+        # prjecting the per atom tokens
         self.atom_proj = nn.Linear(num_levels * num_moments, hidden_size)
         
-        # Level tokens: each has A*M = 10*4 = 40 dims
+        # projecting the per level tokens
         self.level_proj = nn.Linear(num_atom_types * num_moments, hidden_size)
         
         # Positional embeddings for all tokens
@@ -78,6 +88,7 @@ class ScatteringTokenizer(nn.Module):
         
         # Null embedding for CFG
         self.null = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
+        
 
     def forward(self, x, train=False, force_null=False):
         """
@@ -93,7 +104,7 @@ class ScatteringTokenizer(nn.Module):
         if force_null:
             return self.null.expand(B, -1, -1)
         
-        # Reshape: [B, 440] → [B, A, L, M] = [B, 10, 11, 4]
+        # Reshape: [B, 440] → [B, A, L, M] = [B, 10, 11, 4] -- assuming this order of extraction of moments from the GRASSY scatter model
         x = x.view(B, self.num_atom_types, self.num_levels, self.num_moments)
         
         # Atom tokens: [B, A, L*M] = [B, 10, 44] → [B, 10, D]
@@ -124,7 +135,7 @@ def modulate(x, shift, scale):
 
 
 class SELayerWithCrossAttention(nn.Module):
-    """DiT block: self-attn + cross-attn + MLP, all modulated by timestep."""
+    """DiT block: self-attn + cross-attn + MLP, all modulated by timestep (AdalN)."""
     
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0):
         super().__init__()
@@ -134,31 +145,32 @@ class SELayerWithCrossAttention(nn.Module):
         
         # Cross-attention to scattering
         self.norm_cross = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.cross_attn = CrossAttention(hidden_size, num_heads)
+        self.cross_attn = CrossAttention(hidden_size, num_heads, qkv_bias=True, qk_norm=True)
         
         # MLP
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.mlp = Mlp(hidden_size, int(hidden_size * mlp_ratio), use_bn=False) # disables batch norm - might wanna add layer norm
+        self.mlp = Mlp(hidden_size, int(hidden_size * mlp_ratio), use_bn=False) 
         
-        # AdaLN modulation from timestep: 6 params (shift1, scale1, gate1, shift2, scale2, gate2)
+        # AdaLN modulation from timestep: 9 params (shift_i, scale_i, gate_i for i=1,2,3) 
         self.adaLN = nn.Sequential(
-            nn.SiLU(), nn.Linear(hidden_size, 6 * hidden_size)
+            nn.SiLU(), nn.Linear(hidden_size, 9 * hidden_size)
         )
 
     def forward(self, x, c, node_mask, scatter_tokens):
         # c: [B, D] timestep embedding
-        shift1, scale1, gate1, shift2, scale2, gate2 = self.adaLN(c).chunk(6, dim=1)
+        shift1, scale1, gate1, shift2, scale2, gate2, shift3, scale3, gate3 = self.adaLN(c).chunk(9, dim=1)
         
         # Self-attention (modulated)
         h = modulate(self.norm1(x), shift1, scale1)
         x = x + gate1.unsqueeze(1) * self.attn(h, node_mask=node_mask)
         
-        # Cross-attention to scattering (no gating, direct residual)
-        x = x + self.cross_attn(self.norm_cross(x), scatter_tokens)
+        # Cross-attention to scattering (modulated)
+        h = modulate(self.norm_cross(x), shift2, scale2)
+        x = x + gate2.unsqueeze(1) * self.cross_attn(h, scatter_tokens)
         
         # MLP (modulated)
-        h = modulate(self.norm2(x), shift2, scale2)
-        x = x + gate2.unsqueeze(1) * self.mlp(h)
+        h = modulate(self.norm2(x), shift3, scale3)
+        x = x + gate3.unsqueeze(1) * self.mlp(h)
         
         return x
 
@@ -202,7 +214,7 @@ class ScatteringDenoiser(nn.Module):
             for _ in range(depth)
         ])
         
-        # Output projection
+        # Output projection - Imported from torch-molecule (FinalLayer). Projects transformer output to atom/bond predictions.
         self.out_layer = OutLayer(max_n_nodes, hidden_size, Xdim, Edim, mlp_ratio, num_heads)
         
         self._init_weights()
@@ -243,5 +255,5 @@ class ScatteringDenoiser(nn.Module):
             x = block(x, c, node_mask, scatter_tokens)
         
         # Output projection
-        X_pred, E_pred, _ = self.out_layer(x, x_in, e_in, c, t, node_mask)
+        X_pred, E_pred, _ = self.out_layer(x, x_in, e_in, c, t, node_mask) 
         return X_pred, E_pred       
