@@ -122,6 +122,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self._scaffold_node_mask = None
             self._scaffold_edge_mask = None
 
+    # using the torch.mlecule method with just resetting the scaffold after each step
     def sample_p_zs_given_zt(self, s, t, X_t, E_t, properties, node_mask):
         """Override to inject scaffold after each step."""
         result = super().sample_p_zs_given_zt(s, t, X_t, E_t, properties, node_mask)

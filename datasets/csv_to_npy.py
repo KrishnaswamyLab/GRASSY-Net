@@ -21,7 +21,7 @@ except Exception as e:
 
 
 PROP_KEYS = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc',
-             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount']
+             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore'] # <- added the 2 last properties here
 
 
 def compute_props(mol):
@@ -84,11 +84,21 @@ def compute_props(mol):
             out['NumHDonors'] = float(Descriptors.NumHDonors(mol))
         except Exception:
             out['NumHDonors'] = float('nan')
-
+    
     try:
         out['RingCount'] = float(mol.GetRingInfo().NumRings())
     except Exception:
         out['RingCount'] = float('nan')
+    # new properties
+    try:
+        out['MolLogP'] = float(Descriptors.MolLogP(mol))
+    except Exception:
+        out['MolLogP'] = float('nan')
+
+    try:
+        out['SAscore'] = float(rdMolDescriptors.CalcSAScore(mol))
+    except Exception:
+        out['SAscore'] = float('nan')
 
     return out
 

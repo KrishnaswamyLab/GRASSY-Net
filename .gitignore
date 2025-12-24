@@ -50,3 +50,5 @@ lightning_logs/
 TRAINING_DATA/
 
 scripts/download_omol.sh
+generated.txt
+test_scatter.npy
