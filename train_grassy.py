@@ -104,6 +104,7 @@ if __name__ == '__main__':
     # import pdb; pdb.set_trace()
     args.input_dim = len(train_set[0][0])
     args.len_epoch = len(train_loader)
+    args.num_properties = len(train_set[0][1]) # <- allows varriyng number of properties
     print(args.input_dim)
     
     # init module
@@ -149,7 +150,7 @@ if __name__ == '__main__':
     print('saving model')
     torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
 
-    no_transform_dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy')
+    no_transform_dataset = ZINCDataset(f'datasets/{TRANCH}.npy') # <- changed for consistency
 
     scat_mom_list = []
     prop = []
