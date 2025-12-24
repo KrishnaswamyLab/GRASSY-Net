@@ -187,7 +187,7 @@ def train_model(out_file):
     # TRANCH_NAME = 'FBAB'
     # dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
 	# 		prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
-    dataset = ZINCDataset(f'datasets/molecules.npy', prop_stat_dict=f'datasets/molecules_stats.npy', include_ki=False)
+    dataset = ZINCDataset(f'datasets/ZINC12K.npy', prop_stat_dict=f'datasets/ZINC12K_stats.npy', include_ki=False) 
 
     # dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
     # import pdb; pdb.set_trace()
@@ -211,7 +211,7 @@ def train_model(out_file):
 
     model.train()
 
-    for epoch in trange(1, 80 + 1):
+    for epoch in trange(1, 1 + 1):
 
         for data in train_loader:
             # import pdb; pdb.set_trace()
@@ -239,6 +239,6 @@ def train_model(out_file):
    
     print('saving scatter model')
     # torch.save(model.scatter.state_dict(), str(out_file) + f"{TRANCH_NAME}.npy")
-    torch.save(model.scatter.state_dict(), str(out_file) + f"fields_1_trained.npy")
+    torch.save(model.scatter.state_dict(), str(out_file) + f"ZINC12K.npy") # <- changed data too
 
 train_model('scripts/trained_models/')

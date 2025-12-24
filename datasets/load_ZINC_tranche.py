@@ -34,7 +34,7 @@ class ZINCDataset(Dataset):
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
-        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore'] # new properites
+        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # new properites
 
         if include_ki:
             self.prop_list.append('Ki')
@@ -87,7 +87,7 @@ class ZINCDataset(Dataset):
 
         # store properties as proper float tensors (shape [1, num_classes]) to avoid slow list->tensor conversions
         data.no_zscore_props = torch.tensor(no_zscore, dtype=torch.float32)
-        data.y = torch.tensor([props], dtype=torch.float32)
+        data.y = torch.tensor(props, dtype=torch.float32).unsqueeze(0) # <- changed for efficiency
         # import pdb; pdb.set_trace()
         #place node features
         node_feats = []
@@ -122,7 +122,7 @@ class ZINCDataset(Dataset):
 
             node_feats.append(node_feat)
 
-        data.x = torch.Tensor(node_feats)
+        data.x = torch.tensor(np.array(node_feats), dtype=torch.float32) # <- same for efficiency
         # import pdb; pdb.set_trace()
         if self.transform: 
             return self.transform(data)
