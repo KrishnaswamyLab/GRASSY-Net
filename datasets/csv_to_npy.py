@@ -12,6 +12,9 @@ import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import sys
+sys.path.insert(0, 'datasets')
+import sascorer
 
 try:
     from rdkit import Chem
