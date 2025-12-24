@@ -211,7 +211,7 @@ def train_model(out_file):
 
     model.train()
 
-    for epoch in trange(1, 1 + 1):
+    for epoch in trange(1, 80 + 1):
 
         for data in train_loader:
             # import pdb; pdb.set_trace()

@@ -64,11 +64,10 @@ if __name__ == '__main__':
         kl_div = True
         reg = False
 
-    TRANCH = "FBAB"
-    TRANCH_NAME = 'FBAB'
-    full_dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy',
+    TRANCH = "ZINC12K"
+    TRANCH_NAME = 'ZINC12K'
+    full_dataset = ZINCDataset(f'datasets/{TRANCH}.npy', prop_stat_dict=f'datasets/{TRANCH}_stats.npy',
                                 transform=Scattering(scatter_model_name=f'scripts/trained_models/{TRANCH_NAME}.npy'))
-
     if not kl_div:
         args.beta = 0
     if not reg:
