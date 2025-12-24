@@ -34,17 +34,17 @@ def compute_props(mol):
         out['HeavyAtomMolWt'] = float('nan')
 
     try:
-        out['BalabanJ'] = float(rdMolDescriptors.CalcBalabanJ(mol))
+        out['BalabanJ'] = float(Descriptors.BalabanJ(mol))
     except Exception:
         out['BalabanJ'] = float('nan')
 
     try:
-        out['BertzCT'] = float(rdMolDescriptors.CalcBertzCT(mol))
+        out['BertzCT'] = float(Descriptors.BertzCT(mol))
     except Exception:
         out['BertzCT'] = float('nan')
 
     try:
-        out['Ipc'] = float(rdMolDescriptors.CalcIpc(mol))
+        out['Ipc'] = float(Descriptors.Ipc(mol))
     except Exception:
         out['Ipc'] = float('nan')
 
