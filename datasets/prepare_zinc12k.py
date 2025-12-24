@@ -77,6 +77,11 @@ def compute_props(mol):
         out['SAscore'] = float(sascorer.calculateScore(mol))
     except Exception:
         out['SAscore'] = float('nan')
+    
+    try:
+        out['FSP3'] = float(Descriptors.FractionCSP3(mol))
+    except Exception:
+        out['FSP3'] = float('nan')
 
     return out
 

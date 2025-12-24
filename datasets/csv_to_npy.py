@@ -24,7 +24,7 @@ except Exception as e:
 
 
 PROP_KEYS = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc',
-             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore'] # <- added the 2 last properties here
+             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # <- added the 3 last properties here
 
 
 def compute_props(mol):
@@ -65,7 +65,7 @@ def compute_props(mol):
         out['Ipc'] = float(Descriptors.Ipc(mol))
     except Exception:
         out['Ipc'] = float('nan')
-        
+
     try:
         out['TPSA'] = float(rdMolDescriptors.CalcTPSA(mol))
     except Exception:
@@ -102,6 +102,13 @@ def compute_props(mol):
         out['SAscore'] = float(rdMolDescriptors.CalcSAScore(mol))
     except Exception:
         out['SAscore'] = float('nan')
+
+    try:
+        out['FSP3'] = float(Descriptors.FractionCSP3(mol))
+    except Exception:
+        out['FSP3'] = float('nan')
+    
+
 
     return out
 
