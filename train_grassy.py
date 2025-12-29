@@ -93,6 +93,13 @@ if __name__ == '__main__':
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    # Add wandb logger
+    wandb_logger = WandbLogger(
+        project="GRASSY-ZINC12K",
+        name=f"{TRANCH_NAME}_{'regress' if reg else 'noregress'}_{'kld' if kl_div else 'nokld'}",
+        save_dir=save_dir,
+    )
+
     # early stopping 
     early_stop_callback = EarlyStopping(
             monitor='val_loss',
@@ -109,24 +116,29 @@ if __name__ == '__main__':
     
     # init module
     model = GRASSY(hparams=args)
+    # Log hyperparameters to wandb
+    wandb_logger.log_hyperparams(vars(args)) # added this 
 
     # most basic trainer, uses good defaults. Use from_argparse_args if available, otherwise
     # construct Trainer with essential kwargs.
     try:
         if hasattr(pl.Trainer, 'from_argparse_args'):
             trainer = pl.Trainer.from_argparse_args(args,
-                                                    max_epochs=args.n_epochs,
-                                                    # gpus=args.n_gpus,
-                                                    # callbacks=[early_stop_callback],
-                                                    )
+                                        max_epochs=args.n_epochs,
+                                        logger=wandb_logger, # added this 
+                                        # gpus=args.n_gpus,
+                                        # callbacks=[early_stop_callback],
+                                        )
         else:
             trainer = pl.Trainer(max_epochs=args.n_epochs,
+                                logger=wandb_logger, # added this 
                                 #  gpus=args.n_gpus,
                                 #  callbacks=[early_stop_callback]
                                  )
     except Exception:
         # fallback to direct construction
         trainer = pl.Trainer(max_epochs=args.n_epochs,
+                            logger=wandb_logger, # added this 
                             #  gpus=args.n_gpus,
                             #  callbacks=[early_stop_callback]
                              )
