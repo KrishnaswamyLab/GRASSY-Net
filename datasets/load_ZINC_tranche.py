@@ -139,10 +139,15 @@ class Scattering(object):
             raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
         elif scatter_model_name != 'untrained':
-            model.load_state_dict(torch.load(scatter_model_name))
+            # Load to CPU first (works regardless of where model was saved)
+            state_dict = torch.load(scatter_model_name, map_location='cpu')
+            model.load_state_dict(state_dict)
+            # Move to GPU if available
+            if torch.cuda.is_available():
+                model = model.cuda()
         model.eval()
         self.model = model
-    
+            
     def __call__(self, sample):
 
         props = sample.y
