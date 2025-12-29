@@ -157,7 +157,15 @@ if __name__ == '__main__':
 
     #print('saving reconstruction loss')
     loss = np.array(loss)
-    np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_reg_loss_list.npy", loss)
+    np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_total_loss_list.npy", loss)
+    # Save individual loss components
+    recon_losses = np.array(model.get_recon_loss_list())
+    reg_losses = np.array(model.get_reg_loss_list())
+    kl_losses = np.array(model.get_kl_loss_list())
+
+    np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_recon_loss_list.npy", recon_losses)
+    np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_reg_loss_list.npy", reg_losses)
+    np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_kl_loss_list.npy", kl_losses)
 
     print('saving model')
     torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")

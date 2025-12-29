@@ -48,7 +48,10 @@ class GRASSY(pl.LightningModule):
         self.regfc2 = nn.Linear(20, self.num_properties) # <- changed to be robust to varying number of properties
 
         self.loss_list = []
-        
+        self.recon_loss_list = []
+        self.reg_loss_list = []
+        self.kl_loss_list = []
+                
         if hparams.n_gpus > 0:
             self.dev_type = 'cuda'
 
@@ -151,6 +154,9 @@ class GRASSY(pl.LightningModule):
         #total_loss = recon_loss
 
         self.loss_list.append(total_loss.item())
+        self.recon_loss_list.append(recon_loss.item())
+        self.reg_loss_list.append(reg_loss.item())
+        self.kl_loss_list.append(kl_loss.item())
 
         log_losses = {'train_loss' : total_loss.detach(), 
                     'recon_loss' : recon_loss.detach(),
@@ -161,8 +167,16 @@ class GRASSY(pl.LightningModule):
         return total_loss, log_losses
 
     def get_loss_list(self):
-
         return self.loss_list
+
+    def get_recon_loss_list(self):
+        return self.recon_loss_list
+
+    def get_reg_loss_list(self):
+        return self.reg_loss_list
+
+    def get_kl_loss_list(self):
+        return self.kl_loss_list
 
     def training_step(self, batch, batch_idx):
 
