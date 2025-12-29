@@ -4,6 +4,7 @@ Replaces their property conditioning with our cross-attention to scattering toke
 """
 import torch
 import torch.nn.functional as F
+import os
 from torch_molecule import GraphDITMolecularGenerator
 from torch_molecule.generator.graph_dit.utils import PlaceHolder
 from grassy_dit.model import ScatteringDenoiser
@@ -139,6 +140,7 @@ if __name__ == "__main__":
     import argparse
     import numpy as np
     import pandas as pd
+    import os
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', required=True)
@@ -181,6 +183,7 @@ if __name__ == "__main__":
     # sanity check after filtering
     assert len(smiles) > 0, "No valid molecules after filtering"
     assert len(smiles) == len(scattering), "Mismatch after filtering"
+    print("Initializing model...")
 
 
     # Train
@@ -192,8 +195,19 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )
+    print("Model initialized. Starting training...")
     model.fit(X_train=smiles, y_train=scattering)
-    model.save_to_local(args.checkpoint)
+    print("Training complete. Saving checkpoint...")
+    checkpoint_path = os.path.abspath(args.checkpoint)
+    print(f"Saving checkpoint to: {checkpoint_path}")
+    try:
+        model.save_to_local(checkpoint_path)
+        print(f"Checkpoint saved successfully!")
+    except Exception as e:
+        print(f"ERROR saving checkpoint: {e}")
+        import traceback
+        traceback.print_exc()
+    print("Done!")
 
     # example: 
     # python -m grassy_dit.train --data_dir datasets/microsource --epochs 100
