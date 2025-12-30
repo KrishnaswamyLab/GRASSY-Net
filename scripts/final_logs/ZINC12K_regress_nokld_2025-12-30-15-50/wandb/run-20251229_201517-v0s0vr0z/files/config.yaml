@@ -1,0 +1,194 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            r8rhaijedbs1azn5jwzsrbcaj1dniffc:
+                args:
+                    - --n_epochs
+                    - "1"
+                    - --batch_size
+                    - "100"
+                    - --GRASSY_version
+                    - AE+REG
+                    - --alpha
+                    - "0.3"
+                codePath: train_grassy.py
+                codePathLocal: train_grassy.py
+                cpu_count: 4
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "82484699136"
+                email: stolkowsky@gmail.com
+                executable: /home/stolk/miniconda3/envs/grassy_dit/bin/python
+                git:
+                    commit: a8ca629743ef236eed40cafc2cc5c31aa68c57b0
+                    remote: https://github.com/KrishnaswamyLab/GRASSY-Net.git
+                host: shaulslaptop
+                memory:
+                    total: "8221061120"
+                os: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+                program: /mnt/c/Users/stolk/OneDrive/github/GRASSY-Net/train_grassy.py
+                python: CPython 3.10.19
+                root: scripts/final_logs/ZINC12K_regress_nokld/
+                startedAt: "2025-12-29T18:15:17.573398Z"
+                writerId: r8rhaijedbs1azn5jwzsrbcaj1dniffc
+        m:
+            - "1": trainer/global_step
+              "6":
+                - 3
+              "7": []
+            - "2": '*'
+              "5": 1
+              "6":
+                - 1
+              "7": []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 9
+                - 41
+                - 51
+                - 77
+                - 103
+            "2":
+                - 1
+                - 9
+                - 41
+                - 51
+                - 77
+                - 103
+            "3":
+                - 7
+                - 13
+                - 66
+            "4": 3.10.19
+            "5": 0.23.1
+            "12": 0.23.1
+            "13": linux-x86_64
+GRASSY_version:
+    value: AE+REG
+accelerator:
+    value: null
+accumulate_grad_batches:
+    value: null
+alpha:
+    value: 0.3
+amp_backend:
+    value: null
+amp_level:
+    value: null
+auto_lr_find:
+    value: false
+auto_scale_batch_size:
+    value: false
+auto_select_gpus:
+    value: null
+batch_size:
+    value: 100
+benchmark:
+    value: null
+beta:
+    value: 0
+bottle_dim:
+    value: 25
+check_val_every_n_epoch:
+    value: 1
+default_root_dir:
+    value: null
+detect_anomaly:
+    value: false
+devices:
+    value: null
+enable_checkpointing:
+    value: true
+enable_model_summary:
+    value: true
+enable_progress_bar:
+    value: true
+fast_dev_run:
+    value: false
+gpus:
+    value: null
+gradient_clip_algorithm:
+    value: null
+gradient_clip_val:
+    value: null
+hidden_dim:
+    value: 100
+inference_mode:
+    value: true
+input_dim:
+    value: 440
+ipus:
+    value: null
+learning_rate:
+    value: 0.001
+len_epoch:
+    value: 96
+limit_predict_batches:
+    value: null
+limit_test_batches:
+    value: null
+limit_train_batches:
+    value: null
+limit_val_batches:
+    value: null
+log_every_n_steps:
+    value: 50
+logger:
+    value: true
+max_epochs:
+    value: null
+max_steps:
+    value: -1
+max_time:
+    value: null
+min_epochs:
+    value: null
+min_steps:
+    value: null
+move_metrics_to_cpu:
+    value: false
+multiple_trainloader_mode:
+    value: max_size_cycle
+n_epochs:
+    value: 1
+n_gpus:
+    value: 1
+num_nodes:
+    value: 1
+num_processes:
+    value: null
+num_properties:
+    value: 13
+num_sanity_val_steps:
+    value: 2
+overfit_batches:
+    value: 0
+plugins:
+    value: null
+precision:
+    value: 32
+profiler:
+    value: null
+reload_dataloaders_every_n_epochs:
+    value: 0
+replace_sampler_ddp:
+    value: true
+resume_from_checkpoint:
+    value: null
+save_dir:
+    value: scripts/final_logs/
+strategy:
+    value: null
+sync_batchnorm:
+    value: false
+tpu_cores:
+    value: null
+track_grad_norm:
+    value: -1
+val_check_interval:
+    value: null
