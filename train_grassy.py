@@ -88,7 +88,8 @@ if __name__ == '__main__':
     # logger
     now = datetime.datetime.now()
     date_suffix = now.strftime("%Y-%m-%d-%M")
-    save_dir =  args.save_dir + TRANCH_NAME + f"{'_regress_' if reg else '_noregress_'}" + f"{'kld' if kl_div else 'nokld'}" +'/'
+    date_suffix = now.strftime("%Y-%m-%d-%H-%M-%S")
+save_dir =  args.save_dir + TRANCH_NAME + f"{'_regress_' if reg else '_noregress_'}" + f"{'kld' if kl_div else 'nokld'}" + f"_{date_suffix}" +'/' # to keep all runs
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -172,6 +173,9 @@ if __name__ == '__main__':
 
     print('saving model')
     torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
+    # Save model to Wandb
+    wandb_logger.experiment.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
+
 
     no_transform_dataset = ZINCDataset(f'datasets/{TRANCH}.npy') # <- changed for consistency
 
