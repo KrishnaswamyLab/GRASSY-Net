@@ -151,6 +151,9 @@ class Scattering(object):
     def __call__(self, sample):
 
         props = sample.y
+        # Move sample to same device as model
+        device = next(self.model.parameters()).device
+        sample = sample.to(device)
         to_return = self.model(sample)
         
         return to_return[0][0].detach(), sample.y[0]
