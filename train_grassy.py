@@ -87,9 +87,8 @@ if __name__ == '__main__':
 
     # logger
     now = datetime.datetime.now()
-    date_suffix = now.strftime("%Y-%m-%d-%M")
     date_suffix = now.strftime("%Y-%m-%d-%H-%M-%S")
-save_dir =  args.save_dir + TRANCH_NAME + f"{'_regress_' if reg else '_noregress_'}" + f"{'kld' if kl_div else 'nokld'}" + f"_{date_suffix}" +'/' # to keep all runs
+    save_dir =  args.save_dir + TRANCH_NAME + f"{'_regress_' if reg else '_noregress_'}" + f"{'kld' if kl_div else 'nokld'}" + f"_{date_suffix}" +'/' # to keep all runs together
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
