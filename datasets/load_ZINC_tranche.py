@@ -142,18 +142,13 @@ class Scattering(object):
             # Load to CPU first (works regardless of where model was saved)
             state_dict = torch.load(scatter_model_name, map_location='cpu')
             model.load_state_dict(state_dict)
-            # Move to GPU if available
-            if torch.cuda.is_available():
-                model = model.cuda()
+            model = model.cpu()
         model.eval()
         self.model = model
             
     def __call__(self, sample):
 
         props = sample.y
-        # Move sample to same device as model
-        device = next(self.model.parameters()).device
-        sample = sample.to(device)
         to_return = self.model(sample)
         
         return to_return[0][0].detach(), sample.y[0]
