@@ -187,7 +187,13 @@ class GRASSY(pl.LightningModule):
         loss, log_losses = self.loss_multi_GRASSY(recon_x=x, x=x_hat, mu=mu, logvar=logvar, y_pred=y_hat, y=y,
                                                 alpha=self.hparams.alpha, beta=self.hparams.beta, batch_idx=batch_idx)
             
-        return {'loss': loss, 'log': log_losses}
+        # Log metrics explicitly (required for newer PyTorch Lightning)
+        self.log('train_loss', log_losses['train_loss'], on_step=True, on_epoch=True)
+        self.log('recon_loss', log_losses['recon_loss'], on_step=True, on_epoch=True)
+        self.log('pred_loss', log_losses['pred_loss'], on_step=True, on_epoch=True)
+        self.log('kl_loss', log_losses['kl_loss'], on_step=True, on_epoch=True)
+        
+        return loss
    
     def validation_step(self, batch, batch_idx):
 

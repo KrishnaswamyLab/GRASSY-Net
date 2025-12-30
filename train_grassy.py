@@ -80,7 +80,7 @@ if __name__ == '__main__':
 
     # train loader
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size,
-                                        shuffle=True, num_workers=15)
+                                        shuffle=True, num_workers=15) 
     # valid loader 
     valid_loader = torch.utils.data.DataLoader(val_set, batch_size=args.batch_size,
                                         shuffle=False, num_workers=15)
@@ -126,12 +126,14 @@ if __name__ == '__main__':
             trainer = pl.Trainer.from_argparse_args(args,
                                         max_epochs=args.n_epochs,
                                         logger=wandb_logger, # added this 
+                                         log_every_n_steps=1,# this too
                                         # gpus=args.n_gpus,
                                         # callbacks=[early_stop_callback],
                                         )
         else:
             trainer = pl.Trainer(max_epochs=args.n_epochs,
                                 logger=wandb_logger, # added this 
+                                log_every_n_steps=1,# this too
                                 #  gpus=args.n_gpus,
                                 #  callbacks=[early_stop_callback]
                                  )
@@ -139,6 +141,7 @@ if __name__ == '__main__':
         # fallback to direct construction
         trainer = pl.Trainer(max_epochs=args.n_epochs,
                             logger=wandb_logger, # added this 
+                            log_every_n_steps=1,# this too
                             #  gpus=args.n_gpus,
                             #  callbacks=[early_stop_callback]
                              )
