@@ -47,7 +47,7 @@ class ZINCDataset(Dataset):
             self.stats = None
 
         self.transform = transform
-        self.num_node_features = 10
+        self.num_node_features = 14 # changed for 8 atoms but only the previous pairs. not sure if we need to add the new pairs. 
         self.num_classes = len(self.prop_list)
         self.smi = list(self.tranch.keys())
 
@@ -96,29 +96,25 @@ class ZINCDataset(Dataset):
 
             node_feat = np.zeros(self.num_node_features)
             
-            #one hot encoding of atoms       
-            if entry == 'C':
-                node_feat[0] = 1.
-            elif entry == 'O':
-                node_feat[1] = 1.
-            elif entry == 'N':
-                node_feat[2] = 1.
-            elif entry == 'S':
-                node_feat[3] = 1.
-            
-            #pair encoding of atoms
+            #one hot encoding of atoms (8 types: C, O, N, S, F, Cl, Br, I)
+            atom_type_map = {'C': 0, 'O': 1, 'N': 2, 'S': 3, 'F': 4, 'Cl': 5, 'Br': 6, 'I': 7}
+            if entry in atom_type_map:
+                node_feat[atom_type_map[entry]] = 1.
+
+            #pair encoding of atoms (keep existing 6 pairs)
             if entry == 'C' or entry == 'O':
-                node_feat[4] = 1.
+                node_feat[8] = 1.  # C-O pair
             if entry == 'C' or entry == 'N':
-                node_feat[5] = 1.
+                node_feat[9] = 1.  # C-N pair
             if entry == 'C' or entry == 'S':
-                node_feat[6] = 1.
+                node_feat[10] = 1.  # C-S pair
             if entry == 'O' or entry == 'N':
-                node_feat[7] = 1.
-            if entry == 'O'  or entry == 'S':
-                node_feat[8] = 1.
+                node_feat[11] = 1.  # O-N pair
+            if entry == 'O' or entry == 'S':
+                node_feat[12] = 1.  # O-S pair
             if entry == 'N' or entry == 'S':
-                node_feat[9] = 1.
+                node_feat[13] = 1.  # N-S pair
+            # didnt add pairs for the new atoms for now. 
 
             node_feats.append(node_feat)
 
@@ -134,7 +130,7 @@ class Scattering(object):
 
     def __init__(self, scatter_model_name=None):
 
-        model = Scatter(10, trainable_laziness=None)
+        model = Scatter(14, trainable_laziness=None) # 14 rather than 10,new atoms but not new pairs 
         if scatter_model_name == None:
             raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
