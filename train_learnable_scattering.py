@@ -2,6 +2,7 @@ import os, json
 import numpy as np
 import networkx as nx
 from tqdm import trange
+import wandb
 
 import torch
 import torch.utils
@@ -202,10 +203,24 @@ def train_model(out_file):
 
     model = model.to(device)
 
+    # Initialize Wandb
+    wandb.init(
+        project="GRASSY-Scattering",
+        name="ZINC12K_scattering_training",
+        config={
+            "dataset": "ZINC12K",
+            "batch_size": 32,
+            "learning_rate": 1e-4,
+            "max_epochs": 80,
+            "early_stopping_patience": 5,
+            "num_node_features": dataset.num_node_features,
+            "num_classes": dataset.num_classes,
+        }
+    )
+
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     loss_fn = torch.nn.MSELoss()
     early_stopper = EarlyStopping(mode = 'max', patience=5, percentage=True)
-
     results_compiled = []
     early_stopper = EarlyStopping(mode = 'min', patience=5, percentage=False)
 
@@ -222,23 +237,49 @@ def train_model(out_file):
             # import pdb; pdb.set_trace()
             loss.backward()
             optimizer.step()
+            wandb.log({"train_loss_batch": loss.item()})
+
+
 
         results = evaluate(model, loss_fn, train_ds, test_ds, val_ds)
-        print('Epoch:', epoch, results['train_acc'], results['test_acc'])
+        ## ading these to log to wandb
+        train_loss = results['train_acc'].item() if torch.is_tensor(results['train_acc']) else results['train_acc']
+        val_loss = results['val_acc'].item() if torch.is_tensor(results['val_acc']) else results['val_acc']
+        test_loss = results['test_acc'].item() if torch.is_tensor(results['test_acc']) else results['test_acc']
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "test_loss": test_loss,
+        })
+        print('Epoch:', epoch, f"Train: {train_loss:.6f}, Val: {val_loss:.6f}, Test: {test_loss:.6f}")
         results_compiled.append(results['test_acc'])
 
         #torch.save(results, '%s_%d.%s' % (out_file, epoch, out_end))
         if early_stopper.step(results['val_acc']):
             print("Early stopping criterion met. Ending training.")
+            wandb.log({"early_stopped": True, "stopped_at_epoch": epoch})
             break # if the validation accuracy decreases for eight consecutive epochs, break.
 
     model.eval()
 
     results = evaluate(model, loss_fn, train_ds, test_ds, val_ds)
+    # log final results for wandb
+    final_train_loss = results['train_acc'].item() if torch.is_tensor(results['train_acc']) else results['train_acc']
+    final_val_loss = results['val_acc'].item() if torch.is_tensor(results['val_acc']) else results['val_acc']
+    final_test_loss = results['test_acc'].item() if torch.is_tensor(results['test_acc']) else results['test_acc']
+    wandb.log({
+        "final_train_loss": final_train_loss,
+        "final_val_loss": final_val_loss,
+        "final_test_loss": final_test_loss,
+    })
     print("Results compiled:",results_compiled)
    
     print('saving scatter model')
     # torch.save(model.scatter.state_dict(), str(out_file) + f"{TRANCH_NAME}.npy")
     torch.save(model.scatter.state_dict(), str(out_file) + f"ZINC12K.npy") # <- changed data too
+    # Save model to Wandb
+    wandb.save(str(out_file) + f"ZINC12K.npy")
+    wandb.finish()
 
 train_model('scripts/trained_models/')
