@@ -146,14 +146,14 @@ if __name__ == '__main__':
                                         logger=wandb_logger, # added this 
                                          log_every_n_steps=1,# this too
                                         # gpus=args.n_gpus,
-                                        callbacks=[early_stop_callback],
+                                        callbacks=[checkpoint_callback, early_stop_callback],
                                         )
         else:
             trainer = pl.Trainer(max_epochs=args.n_epochs,
                                 logger=wandb_logger, # added this 
                                 log_every_n_steps=1,# this too
                                 #  gpus=args.n_gpus,
-                                callbacks=[early_stop_callback]
+                                callbacks=[checkpoint_callback, early_stop_callback],
                                  )
     except Exception:
         # fallback to direct construction
@@ -161,7 +161,7 @@ if __name__ == '__main__':
                             logger=wandb_logger, # added this 
                             log_every_n_steps=1,# this too
                             #  gpus=args.n_gpus,
-                            callbacks=[early_stop_callback]
+                            callbacks=[checkpoint_callback, early_stop_callback],
                              )
 
     trainer.fit(model=model,

@@ -5,6 +5,7 @@ Replaces their property conditioning with our cross-attention to scattering toke
 import torch
 import torch.nn.functional as F
 import os
+import wandb
 from torch_molecule import GraphDITMolecularGenerator
 from torch_molecule.generator.graph_dit.utils import PlaceHolder
 from grassy_dit.model import ScatteringDenoiser
@@ -155,6 +156,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--checkpoint', default='grassy_dit_checkpoint.pt')
+    parser.add_argument('--resume_from_checkpoint', default=None, type=str, help='Path to checkpoint file to resume from')
     args = parser.parse_args()
     
     # Load data
@@ -185,6 +187,29 @@ if __name__ == "__main__":
     assert len(smiles) == len(scattering), "Mismatch after filtering"
     print("Initializing model...")
 
+    # Load checkpoint if resuming
+    checkpoint = None
+    if args.resume_from_checkpoint and os.path.exists(args.resume_from_checkpoint):
+        print(f"Loading checkpoint from {args.resume_from_checkpoint}")
+        checkpoint = torch.load(args.resume_from_checkpoint, map_location='cpu')
+        print("Checkpoint loaded successfully")
+
+    # Initialize Wandb
+    wandb.init(
+        project="GRASSY-DiT",
+        name=f"GraphDiT_h{args.hidden_size}_l{args.num_layer}_e{args.epochs}",
+        config={
+            "hidden_size": args.hidden_size,
+            "num_layer": args.num_layer,
+            "num_head": args.num_head,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "learning_rate": args.lr,
+            "max_node": args.max_node,
+            "resume_from_checkpoint": args.resume_from_checkpoint is not None,
+        }
+    )
+
 
     # Train
     model = ScatteringGraphDIT(
@@ -195,6 +220,10 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )
+    # Load checkpoint into model if resuming
+    if checkpoint is not None:
+        model._initialize_model(None, checkpoint=checkpoint)
+
     print("Model initialized. Starting training...")
     model.fit(X_train=smiles, y_train=scattering)
     print("Training complete. Saving checkpoint...")
@@ -203,11 +232,14 @@ if __name__ == "__main__":
     try:
         model.save_to_local(checkpoint_path)
         print(f"Checkpoint saved successfully!")
+        # Save to Wandb
+        wandb.save(checkpoint_path)
     except Exception as e:
         print(f"ERROR saving checkpoint: {e}")
         import traceback
         traceback.print_exc()
     print("Done!")
+    wandb.finish()
 
     # example: 
     # python -m grassy_dit.train --data_dir datasets/microsource --epochs 100
