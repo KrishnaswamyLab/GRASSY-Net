@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 from models.GRASSY_model import GRASSY
@@ -39,6 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', default='scripts/final_logs/', type=str)
 
     parser.add_argument('--GRASSY_version', default='AE+REG', type=str)
+    parser.add_argument('--resume_from_checkpoint', default=None, type=str, help='Path to checkpoint file to resume from') # to alow rerun from a checkpoint
 
     # add args from trainer if available (older/newer PL versions differ)
     try:
@@ -117,6 +119,13 @@ if __name__ == '__main__':
             verbose=True,
             mode='min'
             )
+    # Checkpoint callback - saves last checkpoint for resuming
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=save_dir,
+        filename='last-checkpoint',
+        save_last=True,
+        save_top_k=0,  # Only save last checkpoint, not top models
+    )
     # import pdb; pdb.set_trace()
     args.input_dim = len(train_set[0][0])
     args.len_epoch = len(train_loader)
@@ -137,14 +146,14 @@ if __name__ == '__main__':
                                         logger=wandb_logger, # added this 
                                          log_every_n_steps=1,# this too
                                         # gpus=args.n_gpus,
-                                        # callbacks=[early_stop_callback],
+                                        callbacks=[early_stop_callback],
                                         )
         else:
             trainer = pl.Trainer(max_epochs=args.n_epochs,
                                 logger=wandb_logger, # added this 
                                 log_every_n_steps=1,# this too
                                 #  gpus=args.n_gpus,
-                                #  callbacks=[early_stop_callback]
+                                callbacks=[early_stop_callback]
                                  )
     except Exception:
         # fallback to direct construction
@@ -152,12 +161,13 @@ if __name__ == '__main__':
                             logger=wandb_logger, # added this 
                             log_every_n_steps=1,# this too
                             #  gpus=args.n_gpus,
-                            #  callbacks=[early_stop_callback]
+                            callbacks=[early_stop_callback]
                              )
 
     trainer.fit(model=model,
                 train_dataloaders=train_loader,
                 val_dataloaders=valid_loader,
+                ckpt_path=args.resume_from_checkpoint,
                 )
 
 
