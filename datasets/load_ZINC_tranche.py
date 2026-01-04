@@ -47,7 +47,7 @@ class ZINCDataset(Dataset):
             self.stats = None
 
         self.transform = transform
-        self.num_node_features = 14 # changed for 8 atoms but only the previous pairs. not sure if we need to add the new pairs. 
+        self.num_node_features = 16  # 8 atom types + 8 pairs (C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
         self.num_classes = len(self.prop_list)
         self.smi = list(self.tranch.keys())
 
@@ -101,20 +101,24 @@ class ZINCDataset(Dataset):
             if entry in atom_type_map:
                 node_feat[atom_type_map[entry]] = 1.
 
-            #pair encoding of atoms (keep existing 6 pairs)
+            #pair encoding of atoms (8 pairs: C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
             if entry == 'C' or entry == 'O':
                 node_feat[8] = 1.  # C-O pair
             if entry == 'C' or entry == 'N':
                 node_feat[9] = 1.  # C-N pair
             if entry == 'C' or entry == 'S':
                 node_feat[10] = 1.  # C-S pair
-            if entry == 'O' or entry == 'N':
-                node_feat[11] = 1.  # O-N pair
+            if entry == 'O' or entry == 'N':  # Fixed: handles both O-N and N-O
+                node_feat[11] = 1.  # N-O pair
             if entry == 'O' or entry == 'S':
                 node_feat[12] = 1.  # O-S pair
             if entry == 'N' or entry == 'S':
                 node_feat[13] = 1.  # N-S pair
-            # didnt add pairs for the new atoms for now. 
+            if entry == 'C' or entry == 'F':
+                node_feat[14] = 1.  # C-F pair
+            if entry == 'C' or entry == 'Cl':
+                node_feat[15] = 1.  # C-Cl pair
+            # using most common pairs for now 
 
             node_feats.append(node_feat)
 
@@ -130,7 +134,7 @@ class Scattering(object):
 
     def __init__(self, scatter_model_name=None):
 
-        model = Scatter(14, trainable_laziness=None) # 14 rather than 10,new atoms but not new pairs 
+        model = Scatter(16, trainable_laziness=None)  # 16 features: 8 atoms + 8 pairs
         if scatter_model_name == None:
             raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")

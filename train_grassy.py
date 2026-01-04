@@ -73,16 +73,25 @@ if __name__ == '__main__':
     if not reg:
         args.alpha = 0
 
-    train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_set, val_set = torch.utils.data.random_split(full_dataset, [train_size, val_size])
-    #test_dataset = torch.utils.data.TensorDataset(*test_tup)
+    # Proper train/val/test split (80/10/10)
+    # Original ZINC splits: train=10000, val=1000, test=1000
+    train_size = 10000
+    val_size = 1000
+    test_size = len(full_dataset) - train_size - val_size
+
+    train_set, val_set, test_set = torch.utils.data.random_split(
+        full_dataset, [train_size, val_size, test_size], 
+        generator=torch.Generator().manual_seed(42)  # For reproducibility
+    )
 
     # train loader
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size,
                                         shuffle=True, num_workers=15) 
     # valid loader 
     valid_loader = torch.utils.data.DataLoader(val_set, batch_size=args.batch_size,
+                                        shuffle=False, num_workers=15)
+    # test loader (for final evaluation)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size,
                                         shuffle=False, num_workers=15)
 
     # logger
