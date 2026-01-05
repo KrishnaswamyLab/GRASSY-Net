@@ -224,6 +224,12 @@ class GRASSY(pl.LightningModule):
                     'val_kl_loss': kl_loss.detach()
                     }
 
+        # Log metrics explicitly (required for checkpoint callback to monitor)
+        self.log('val_loss', total_loss, on_step=False, on_epoch=True)
+        self.log('val_recon_loss', recon_loss, on_step=False, on_epoch=True)
+        self.log('val_pred_loss', reg_loss, on_step=False, on_epoch=True)
+        self.log('val_kl_loss', kl_loss, on_step=False, on_epoch=True)
+
         return log_losses
 
     # def on_validation_epoch_end(self, outputs):

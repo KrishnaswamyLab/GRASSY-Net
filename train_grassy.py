@@ -119,12 +119,14 @@ if __name__ == '__main__':
             verbose=True,
             mode='min'
             )
-    # Checkpoint callback - saves last checkpoint for resuming
+    # Checkpoint callback - saves best validation model and last checkpoint
     checkpoint_callback = ModelCheckpoint(
         dirpath=save_dir,
-        filename='last-checkpoint',
-        save_last=True,
-        save_top_k=0,  # Only save last checkpoint, not top models
+        filename='best-{epoch}-{val_loss:.3f}',
+        monitor='val_loss',  # Monitor validation loss
+        mode='min',  # Lower is better
+        save_top_k=1,  # Save the best model
+        save_last=True,  # Also save last checkpoint for resuming
     )
     # import pdb; pdb.set_trace()
     args.input_dim = len(train_set[0][0])
@@ -171,8 +173,6 @@ if __name__ == '__main__':
                 )
 
 
-    model = model.cpu()
-    model.dev_type = 'cpu'
 
     with torch.no_grad():
         loss = model.get_loss_list()
@@ -190,7 +190,22 @@ if __name__ == '__main__':
     np.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_kl_loss_list.npy", kl_losses)
 
     print('saving model')
-    torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
+    # Load best checkpoint (best validation performance)
+    best_model_path = checkpoint_callback.best_model_path
+    if best_model_path:
+        # Load the best model
+        best_model = GRASSY.load_from_checkpoint(best_model_path, hparams=args)
+        # save it 
+        model = best_model.cpu()
+        model.dev_type = 'cpu'
+        # Save the best model state dict
+        torch.save(best_model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
+        print(f"Saved best model from epoch {checkpoint_callback.best_model_score}")
+    else:
+        # Fallback: save current model if no best checkpoint found
+        model = model.cpu()
+        model.dev_type = 'cpu'
+        torch.save(model.state_dict(), save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
     # Save model to Wandb
     wandb_logger.experiment.save(save_dir + f"{TRANCH_NAME}_{'noregress' if not reg else 'regress'}_{'nokld' if not kl_div  else 'kld'}_model.npy")
 
