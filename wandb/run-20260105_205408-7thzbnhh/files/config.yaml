@@ -1,0 +1,68 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            4wskup9zyzo74ov5ljuj0wia4l3bvxgw:
+                args:
+                    - --data_dir
+                    - grassy_dit/data
+                    - --epochs
+                    - "3"
+                cpu_count: 4
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "83524415488"
+                email: stolkowsky@gmail.com
+                executable: /home/stolk/miniconda3/envs/grassy_dit/bin/python
+                git:
+                    commit: 4f5a15029bac955327175a9d12370f4bed3e1fe8
+                    remote: https://github.com/KrishnaswamyLab/GRASSY-Net.git
+                host: shaulslaptop
+                memory:
+                    total: "8221061120"
+                os: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+                program: -m grassy_dit.train
+                python: CPython 3.10.19
+                root: /mnt/c/Users/stolk/OneDrive/github/GRASSY-Net
+                startedAt: "2026-01-05T18:54:08.558896Z"
+                writerId: 4wskup9zyzo74ov5ljuj0wia4l3bvxgw
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 5
+                - 53
+                - 77
+            "2":
+                - 1
+                - 5
+                - 53
+                - 77
+            "3":
+                - 2
+                - 3
+                - 13
+                - 16
+            "4": 3.10.19
+            "5": 0.23.1
+            "12": 0.23.1
+            "13": linux-x86_64
+batch_size:
+    value: 32
+epochs:
+    value: 3
+hidden_size:
+    value: 384
+learning_rate:
+    value: 0.0001
+max_node:
+    value: 50
+num_head:
+    value: 16
+num_layer:
+    value: 12
+resume_from_checkpoint:
+    value: false

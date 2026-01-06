@@ -43,7 +43,7 @@ class GRASSY(pl.LightningModule):
         self.fc4 = nn.Linear(self.hidden_dim, self.input_dim)
 
         # property prediction (dynamic output size based on num_properties)
-        self.num_properties = getattr(self.hparams, 'num_properties', 10)  # default to 10 for backward compatibility
+        self.num_properties = getattr(self.hparams, 'num_properties', 13) 
         self.regfc1 = nn.Linear(self.bottle_dim, 20)
         self.regfc2 = nn.Linear(20, self.num_properties) # <- changed to be robust to varying number of properties
 
