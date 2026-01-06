@@ -34,7 +34,7 @@ class ZINCDataset(Dataset):
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
-        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount']
+        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # new properites
 
         if include_ki:
             self.prop_list.append('Ki')
@@ -47,7 +47,7 @@ class ZINCDataset(Dataset):
             self.stats = None
 
         self.transform = transform
-        self.num_node_features = 10
+        self.num_node_features = 16  # 8 atom types + 8 pairs (C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
         self.num_classes = len(self.prop_list)
         self.smi = list(self.tranch.keys())
 
@@ -87,7 +87,7 @@ class ZINCDataset(Dataset):
 
         # store properties as proper float tensors (shape [1, num_classes]) to avoid slow list->tensor conversions
         data.no_zscore_props = torch.tensor(no_zscore, dtype=torch.float32)
-        data.y = torch.tensor([props], dtype=torch.float32)
+        data.y = torch.tensor(props, dtype=torch.float32).unsqueeze(0) # <- changed for efficiency
         # import pdb; pdb.set_trace()
         #place node features
         node_feats = []
@@ -96,33 +96,33 @@ class ZINCDataset(Dataset):
 
             node_feat = np.zeros(self.num_node_features)
             
-            #one hot encoding of atoms       
-            if entry == 'C':
-                node_feat[0] = 1.
-            elif entry == 'O':
-                node_feat[1] = 1.
-            elif entry == 'N':
-                node_feat[2] = 1.
-            elif entry == 'S':
-                node_feat[3] = 1.
-            
-            #pair encoding of atoms
+            #one hot encoding of atoms (8 types: C, O, N, S, F, Cl, Br, I)
+            atom_type_map = {'C': 0, 'O': 1, 'N': 2, 'S': 3, 'F': 4, 'Cl': 5, 'Br': 6, 'I': 7}
+            if entry in atom_type_map:
+                node_feat[atom_type_map[entry]] = 1.
+
+            #pair encoding of atoms (8 pairs: C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
             if entry == 'C' or entry == 'O':
-                node_feat[4] = 1.
+                node_feat[8] = 1.  # C-O pair
             if entry == 'C' or entry == 'N':
-                node_feat[5] = 1.
+                node_feat[9] = 1.  # C-N pair
             if entry == 'C' or entry == 'S':
-                node_feat[6] = 1.
-            if entry == 'O' or entry == 'N':
-                node_feat[7] = 1.
-            if entry == 'O'  or entry == 'S':
-                node_feat[8] = 1.
+                node_feat[10] = 1.  # C-S pair
+            if entry == 'O' or entry == 'N':  # Fixed: handles both O-N and N-O
+                node_feat[11] = 1.  # N-O pair
+            if entry == 'O' or entry == 'S':
+                node_feat[12] = 1.  # O-S pair
             if entry == 'N' or entry == 'S':
-                node_feat[9] = 1.
+                node_feat[13] = 1.  # N-S pair
+            if entry == 'C' or entry == 'F':
+                node_feat[14] = 1.  # C-F pair
+            if entry == 'C' or entry == 'Cl':
+                node_feat[15] = 1.  # C-Cl pair
+            # using most common pairs for now 
 
             node_feats.append(node_feat)
 
-        data.x = torch.Tensor(node_feats)
+        data.x = torch.tensor(np.array(node_feats), dtype=torch.float32) # <- same for efficiency
         # import pdb; pdb.set_trace()
         if self.transform: 
             return self.transform(data)
@@ -134,15 +134,18 @@ class Scattering(object):
 
     def __init__(self, scatter_model_name=None):
 
-        model = Scatter(10, trainable_laziness=None)
+        model = Scatter(16, trainable_laziness=None)  # 16 features: 8 atoms + 8 pairs
         if scatter_model_name == None:
             raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
         elif scatter_model_name != 'untrained':
-            model.load_state_dict(torch.load(scatter_model_name))
+            # Load to CPU first (works regardless of where model was saved)
+            state_dict = torch.load(scatter_model_name, map_location='cpu')
+            model.load_state_dict(state_dict)
+            model = model.cpu()
         model.eval()
         self.model = model
-    
+            
     def __call__(self, sample):
 
         props = sample.y

@@ -42,12 +42,16 @@ class GRASSY(pl.LightningModule):
         self.fc3 = nn.Linear(self.bottle_dim, self.hidden_dim)
         self.fc4 = nn.Linear(self.hidden_dim, self.input_dim)
 
-        # property prediction
+        # property prediction (dynamic output size based on num_properties)
+        self.num_properties = getattr(self.hparams, 'num_properties', 10)  # default to 10 for backward compatibility
         self.regfc1 = nn.Linear(self.bottle_dim, 20)
-        self.regfc2 = nn.Linear(20, 10)
+        self.regfc2 = nn.Linear(20, self.num_properties) # <- changed to be robust to varying number of properties
 
         self.loss_list = []
-        
+        self.recon_loss_list = []
+        self.reg_loss_list = []
+        self.kl_loss_list = []
+                
         if hparams.n_gpus > 0:
             self.dev_type = 'cuda'
 
@@ -150,6 +154,9 @@ class GRASSY(pl.LightningModule):
         #total_loss = recon_loss
 
         self.loss_list.append(total_loss.item())
+        self.recon_loss_list.append(recon_loss.item())
+        self.reg_loss_list.append(reg_loss.item())
+        self.kl_loss_list.append(kl_loss.item())
 
         log_losses = {'train_loss' : total_loss.detach(), 
                     'recon_loss' : recon_loss.detach(),
@@ -160,8 +167,16 @@ class GRASSY(pl.LightningModule):
         return total_loss, log_losses
 
     def get_loss_list(self):
-
         return self.loss_list
+
+    def get_recon_loss_list(self):
+        return self.recon_loss_list
+
+    def get_reg_loss_list(self):
+        return self.reg_loss_list
+
+    def get_kl_loss_list(self):
+        return self.kl_loss_list
 
     def training_step(self, batch, batch_idx):
 
@@ -172,7 +187,13 @@ class GRASSY(pl.LightningModule):
         loss, log_losses = self.loss_multi_GRASSY(recon_x=x, x=x_hat, mu=mu, logvar=logvar, y_pred=y_hat, y=y,
                                                 alpha=self.hparams.alpha, beta=self.hparams.beta, batch_idx=batch_idx)
             
-        return {'loss': loss, 'log': log_losses}
+        # Log metrics explicitly (required for newer PyTorch Lightning)
+        self.log('train_loss', log_losses['train_loss'], on_step=True, on_epoch=True)
+        self.log('recon_loss', log_losses['recon_loss'], on_step=True, on_epoch=True)
+        self.log('pred_loss', log_losses['pred_loss'], on_step=True, on_epoch=True)
+        self.log('kl_loss', log_losses['kl_loss'], on_step=True, on_epoch=True)
+        
+        return loss
    
     def validation_step(self, batch, batch_idx):
 
@@ -202,6 +223,12 @@ class GRASSY(pl.LightningModule):
                     'val_pred_loss' :reg_loss.detach(),
                     'val_kl_loss': kl_loss.detach()
                     }
+
+        # Log metrics explicitly (required for checkpoint callback to monitor)
+        self.log('val_loss', total_loss, on_step=False, on_epoch=True)
+        self.log('val_recon_loss', recon_loss, on_step=False, on_epoch=True)
+        self.log('val_pred_loss', reg_loss, on_step=False, on_epoch=True)
+        self.log('val_kl_loss', kl_loss, on_step=False, on_epoch=True)
 
         return log_losses
 

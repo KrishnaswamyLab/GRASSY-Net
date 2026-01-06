@@ -12,6 +12,9 @@ import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import sys
+sys.path.insert(0, 'datasets')
+import sascorer
 
 try:
     from rdkit import Chem
@@ -21,7 +24,7 @@ except Exception as e:
 
 
 PROP_KEYS = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc',
-             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount']
+             'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # <- added the 3 last properties here
 
 
 def compute_props(mol):
@@ -49,17 +52,17 @@ def compute_props(mol):
         out['HeavyAtomMolWt'] = float('nan')
 
     try:
-        out['BalabanJ'] = float(rdMolDescriptors.CalcBalabanJ(mol))
+        out['BalabanJ'] = float(Descriptors.BalabanJ(mol))
     except Exception:
         out['BalabanJ'] = float('nan')
 
     try:
-        out['BertzCT'] = float(rdMolDescriptors.CalcBertzCT(mol))
+        out['BertzCT'] = float(Descriptors.BertzCT(mol))
     except Exception:
         out['BertzCT'] = float('nan')
 
     try:
-        out['Ipc'] = float(rdMolDescriptors.CalcIpc(mol))
+        out['Ipc'] = float(Descriptors.Ipc(mol))
     except Exception:
         out['Ipc'] = float('nan')
 
@@ -84,11 +87,28 @@ def compute_props(mol):
             out['NumHDonors'] = float(Descriptors.NumHDonors(mol))
         except Exception:
             out['NumHDonors'] = float('nan')
-
+    
     try:
         out['RingCount'] = float(mol.GetRingInfo().NumRings())
     except Exception:
         out['RingCount'] = float('nan')
+    # new properties
+    try:
+        out['MolLogP'] = float(Descriptors.MolLogP(mol))
+    except Exception:
+        out['MolLogP'] = float('nan')
+
+    try:
+        out['SAscore'] = float(rdMolDescriptors.CalcSAScore(mol))
+    except Exception:
+        out['SAscore'] = float('nan')
+
+    try:
+        out['FSP3'] = float(Descriptors.FractionCSP3(mol))
+    except Exception:
+        out['FSP3'] = float('nan')
+    
+
 
     return out
 
