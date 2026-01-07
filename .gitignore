@@ -14,7 +14,7 @@ env/
 *.ckpt
 *.bin
 checkpoints/
-models/
+# models/
 weights/
 
 # Datasets
@@ -50,8 +50,10 @@ lightning_logs/
 TRAINING_DATA/
 
 scripts/download_omol.sh
+scripts/final_logs/
 generated.txt
 test_scatter.npy
 data/ZINC/
 requirements.txt
 zinc12k_analysis/*.ipynb
+wandb/
