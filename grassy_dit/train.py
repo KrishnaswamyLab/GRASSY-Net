@@ -17,6 +17,7 @@ class ScatteringTransformerAdapter(torch.nn.Module):
     def __init__(self, denoiser):
         super().__init__()
         self.denoiser = denoiser
+        self.step = 0  # Track training step for Wandb logging
     
     def forward(self, noisy_data, unconditioned):
         X_t = noisy_data['X_t'].float()
@@ -44,16 +45,37 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         mask_X = (true_X != 0.).any(dim=-1)
         mask_E = (true_E != 0.).any(dim=-1)
         flat_true_X = true_X[mask_X, :]
-        flat_pred_X = masked_pred_X[mask_X, :] # masked out padding positions known from ground truth. this seems to be a common practice so I use it for now, though it does seem there is somewhat of a logical failure in assuming we know the ground truth for the padding positions.
+        flat_pred_X = masked_pred_X[mask_X, :]
         flat_true_E = true_E[mask_E, :]
-        flat_pred_E = masked_pred_E[mask_E, :] # same as above
+        flat_pred_E = masked_pred_E[mask_E, :]
 
-        # cross_entropy expects: predictions [N, num_classes] as logits, targets [N] as class indices
-        # argmax converts one-hot ground truth to integer labels: [1,0,0] → 0
         loss_X = F.cross_entropy(flat_pred_X, torch.argmax(flat_true_X, dim=-1)) if true_X.numel() > 0 else 0.0
         loss_E = F.cross_entropy(flat_pred_E, torch.argmax(flat_true_E, dim=-1)) if true_E.numel() > 0 else 0.0
         loss = lw_X * loss_X + lw_E * loss_E
-        return loss, loss_X, loss_E # returning 3 of them for now, might be redundant though
+        
+        # Log to Wandb
+        if isinstance(loss_X, torch.Tensor):
+            loss_X_val = loss_X.item()
+        else:
+            loss_X_val = loss_X
+        if isinstance(loss_E, torch.Tensor):
+            loss_E_val = loss_E.item()
+        else:
+            loss_E_val = loss_E
+        if isinstance(loss, torch.Tensor):
+            loss_val = loss.item()
+        else:
+            loss_val = loss
+        
+        wandb.log({
+            "train_loss": loss_val,
+            "train_loss_X": loss_X_val,
+            "train_loss_E": loss_E_val,
+            "step": self.step
+        })
+        self.step += 1
+        
+        return loss, loss_X, loss_E
 
     # just a toourch requirement, actual intialization of parameters is done in the ScatteringDenoiser class
     def initialize_parameters(self):
@@ -67,9 +89,28 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    # currently skipping validation as the origina graphDiT validation is not compatible with the scattering data. might wanna add some validation later on.
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
-        """Bypass validation for 440-D scattering - just return as-is."""
+        """Compute num_atom_types from scattering dimension."""
+        if y is not None:
+            # Compute num_atom_types from scattering dimension
+            # scattering_dim = num_atom_types * num_levels * num_moments
+            num_levels = 11
+            num_moments = 4
+            if hasattr(y, 'shape'):
+                scattering_dim = y.shape[-1] if len(y.shape) > 1 else len(y)
+            else:
+                # Handle list/array
+                scattering_dim = len(y[0]) if len(y) > 0 else len(y)
+            
+            num_atom_types = scattering_dim // (num_levels * num_moments)
+            self.num_atom_types = num_atom_types
+            self.num_levels = num_levels
+            self.num_moments = num_moments
+            
+            print(f"Detected scattering dimension: {scattering_dim}")
+            print(f"Computed num_atom_types: {num_atom_types} (should equal in_channels from Scatter model)")
+            assert scattering_dim == num_atom_types * num_levels * num_moments, \
+                f"Scattering dimension {scattering_dim} must equal num_atom_types * {num_levels} * {num_moments}"
         return X, y
     
     def _initialize_model(self, model_class, checkpoint=None):
@@ -84,13 +125,32 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_heads=self.num_head,
             Xdim=self.input_dim_X,
             Edim=self.input_dim_E,
+            num_atom_types=getattr(self, 'num_atom_types', 16),  # Use computed value or default
+            num_levels=getattr(self, 'num_levels', 11),
+            num_moments=getattr(self, 'num_moments', 4),
         )
         self.model = ScatteringTransformerAdapter(denoiser).to(self.device)
         
         if checkpoint is not None:
             self.model.load_state_dict(checkpoint["model_state_dict"])
-    
+        
         return self.model
+    
+    def fit(self, X_train, y_train, X_val=None, y_val=None, **kwargs):
+        """Override fit to add Wandb logging."""
+        # Call parent fit which will trigger _validate_inputs and _initialize_model
+        result = super().fit(X_train=X_train, y_train=y_train, **kwargs)
+            
+        # Log hyperparameters
+        if hasattr(self, 'num_atom_types'):
+            wandb.config.update({
+                "num_atom_types": self.num_atom_types,
+                "num_levels": self.num_levels,
+                "num_moments": self.num_moments,
+                "scattering_dim": self.num_atom_types * self.num_levels * self.num_moments,
+            })
+        
+        return result
     
     @torch.no_grad()
     def generate(self, scattering, num_nodes=None, batch_size=1,
@@ -220,12 +280,25 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )
+    
+    # Compute num_atom_types from scattering data before initializing model (needed for checkpoint resume)
+    num_levels = 11
+    num_moments = 4
+    scattering_dim = scattering.shape[-1] if len(scattering.shape) > 1 else len(scattering)
+    num_atom_types = scattering_dim // (num_levels * num_moments)
+    model.num_atom_types = num_atom_types
+    model.num_levels = num_levels
+    model.num_moments = num_moments
+
     # Load checkpoint into model if resuming
     if checkpoint is not None:
         model._initialize_model(None, checkpoint=checkpoint)
 
+
     print("Model initialized. Starting training...")
+
     model.fit(X_train=smiles, y_train=scattering)
+
     print("Training complete. Saving checkpoint...")
     checkpoint_path = os.path.abspath(args.checkpoint)
     print(f"Saving checkpoint to: {checkpoint_path}")

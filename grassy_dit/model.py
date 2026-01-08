@@ -66,7 +66,7 @@ class ScatteringTokenizer(nn.Module):
     Same moment data appears in both → model can query by atom OR by level.
     """
     
-    def __init__(self, hidden_size=384, num_atom_types=10, num_levels=11, 
+    def __init__(self, hidden_size=384, num_atom_types=16, num_levels=11, 
                  num_moments=4, dropout=0.1): # should change the default to be the actual number of atom types 
         super().__init__()
         self.num_atom_types = num_atom_types
@@ -193,7 +193,7 @@ class ScatteringDenoiser(nn.Module):
     
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
-                 num_atom_types=10, num_levels=11, num_moments=4):
+                 num_atom_types=16, num_levels=11, num_moments=4):
         super().__init__()
         self.max_n_nodes = max_n_nodes
         self.hidden_size = hidden_size
