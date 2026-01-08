@@ -178,15 +178,10 @@ def evaluate(model, loss_fn, train_ds, test_ds, val_ds):
 
 def train_model(out_file):
 
-    # TRANCH = "FBAB"
-    # TRANCH_NAME = 'FBAB'
-    # dataset = ZINCDataset(f'datasets/{TRANCH}_subset.npy', 
-	# 		prop_stat_dict=f'datasets/{TRANCH}_subset_stats.npy', include_ki=False)
     dataset = ZINCDataset(f'datasets/ZINC12K.npy', prop_stat_dict=f'datasets/ZINC12K_stats.npy', include_ki=False) 
 
-    # dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
-    # import pdb; pdb.set_trace()
     train_ds, val_ds, test_ds = split_dataset(dataset)
+
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 
     model = TSNet(
@@ -199,6 +194,7 @@ def train_model(out_file):
 
     # Initialize Wandb
     wandb.init(
+        entity='grassy',
         project="GRASSY-Scattering",
         name="ZINC12K_scattering_training",
         config={

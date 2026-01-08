@@ -268,8 +268,6 @@ class Scatter(torch.nn.Module):
         
         # Replace ABSOLUTE with per-wavelet MLPs for s1
         # subtracted shape: (4, N, C) -> need to apply MLP per wavelet scale
-        # REPLACED: s1 = torch.abs(
-        # torch.transpose(torch.transpose(subtracted, 0, 1), 1, 2))  # transpose the dimensions to match previous
         s1_list = []
         for l in range(self.L):
             # subtracted[l] has shape (N, C)
