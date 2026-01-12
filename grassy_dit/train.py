@@ -257,6 +257,7 @@ if __name__ == "__main__":
     # Initialize Wandb
     wandb.init(
         project="GRASSY-DiT",
+        entity="grassy",
         name=f"GraphDiT_h{args.hidden_size}_l{args.num_layer}_e{args.epochs}",
         config={
             "hidden_size": args.hidden_size,
