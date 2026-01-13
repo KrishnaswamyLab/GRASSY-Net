@@ -107,6 +107,7 @@ if __name__ == '__main__':
     # Add wandb logger
     wandb_logger = WandbLogger(
         project="GRASSY-ZINC12K",
+        entity="grassy",
         name=f"{TRANCH_NAME}_{'regress' if reg else 'noregress'}_{'kld' if kl_div else 'nokld'}",
         save_dir=save_dir,
     )
