@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: molsets
+Version: 1.0
+Summary: Molecular Sets (MOSES): A Benchmarking Platform for Molecular Generation Models
+Author: Insilico Medicine
+Author-email: moses@insilico.com
+License: MIT
+Requires-Python: >=3.5.0
+License-File: LICENSE
+Requires-Dist: tqdm>=4.26.0
+Requires-Dist: matplotlib>=3.0.0
+Requires-Dist: numpy>=1.15
+Requires-Dist: pandas>=0.25
+Requires-Dist: scipy>=1.1.0
+Requires-Dist: torch>=1.1.0
+Requires-Dist: fcd_torch>=1.0.5
+Requires-Dist: seaborn>=0.9.0
+Requires-Dist: pomegranate
+Dynamic: author
+Dynamic: author-email
+Dynamic: license
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
