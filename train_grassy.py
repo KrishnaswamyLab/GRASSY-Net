@@ -216,18 +216,11 @@ if __name__ == '__main__':
 
     scat_mom_list = []
     prop = []
-    qed = []
-    heavywt = []
-    tpsa = []
-    ringcount = []
+    # Create a list for each of the 13 properties
+    for i in range(13):
+        prop.append([])
     # ki =  []
     
-    prop.append(qed)
-    prop.append(heavywt)
-    prop.append(tpsa)
-    prop.append(ringcount)
-    # prop.append(ki)
-
     atom_percentage = []
     carbon = []
     nitro = []
@@ -239,30 +232,28 @@ if __name__ == '__main__':
     for index, entry in enumerate(tqdm(full_dataset)):
 
         scat_mom_list.append(entry[0].detach().cpu().numpy())
-        qed.append(entry[1][0])
-        heavywt.append(entry[1][1])
-        tpsa.append(entry[1][6])
-        ringcount.append(entry[1][9])
-        # ki.append(entry[1][10])
+        # Save all 13 properties
+        for i in range(13):
+            prop[i].append(entry[1][i])
 
         data = no_transform_dataset[index]
 
         c = 0
         n = 0
         o = 0
-        i = 0
-        for entry in data.element:
-            if entry == 'C':
+        atom_count = 0
+        for atom_entry in data.element:
+            if atom_entry == 'C':
                 c = c + 1
-            if entry == 'N':
+            if atom_entry == 'N':
                 n = n + 1
-            if entry == 'O':
+            if atom_entry == 'O':
                 o = o + 1
-            i += 1
-        
-        c = c / i   
-        n = n / i 
-        o = o / i 
+            atom_count += 1
+
+        c = c / atom_count   
+        n = n / atom_count 
+        o = o / atom_count 
         carbon.append(c)
         nitro.append(n)
         oxy.append(o)
