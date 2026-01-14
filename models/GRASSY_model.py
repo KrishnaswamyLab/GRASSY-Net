@@ -14,13 +14,11 @@ class GRASSY(pl.LightningModule):
     def __init__(self, hparams):
 
         super(GRASSY, self).__init__()
-        # use Lightning helper to save hyperparameters (handles different PL versions)
-        try:
-            # if hparams is an argparse Namespace this will save its fields
-            self.save_hyperparameters(hparams)
-        except Exception:
-            # fallback: attach a copy
-            self.hparams = hparams
+        # Convert Namespace to dict if needed
+        if hasattr(hparams, '__dict__') and not isinstance(hparams, dict):
+            hparams = vars(hparams)
+        
+        self.save_hyperparameters(hparams)
 
         self.alpha = self.hparams.alpha
         self.beta = self.hparams.beta
@@ -52,10 +50,10 @@ class GRASSY(pl.LightningModule):
         self.reg_loss_list = []
         self.kl_loss_list = []
                 
-        if hparams.n_gpus > 0:
+        if self.hparams.n_gpus > 0:
             self.dev_type = 'cuda'
 
-        if hparams.n_gpus == 0:
+        if self.hparams.n_gpus == 0:
             self.dev_type = 'cpu'
         
         self.eps = 1e-5

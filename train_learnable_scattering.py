@@ -205,6 +205,7 @@ def train_model(out_file):
 
     # Initialize Wandb
     wandb.init(
+        
         project="GRASSY-Scattering",
         name="ZINC12K_scattering_training",
         config={
