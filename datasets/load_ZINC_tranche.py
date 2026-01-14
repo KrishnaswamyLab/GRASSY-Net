@@ -16,7 +16,8 @@ from torch_geometric import data
 
 from pysmiles import read_smiles
 
-from models.LEGS_module import Scatter
+# from models.LEGS_module import Scatter
+from models.MLP_LEGS_module import Scatter
 from rdkit import Chem
 from torch_geometric.utils import from_networkx
 
@@ -134,7 +135,7 @@ class Scattering(object):
 
     def __init__(self, scatter_model_name=None):
 
-        model = Scatter(16, trainable_laziness=None)  # 16 features: 8 atoms + 8 pairs
+        model = Scatter(16, trainable_scattering=False,max_graph_size=100)  # 16 features: 8 atoms + 8 pairs
         if scatter_model_name == None:
             raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
