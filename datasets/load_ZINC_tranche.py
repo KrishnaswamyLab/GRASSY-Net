@@ -17,7 +17,7 @@ from torch_geometric import data
 from pysmiles import read_smiles
 
 # from models.LEGS_module import Scatter
-from models.MLP_LEGS_module import Scatter
+from models.MLP_Scattering_module import Scatter
 from rdkit import Chem
 from torch_geometric.utils import from_networkx
 
@@ -141,7 +141,7 @@ class Scattering(object):
             scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
         elif scatter_model_name != 'untrained':
             # Load to CPU first (works regardless of where model was saved)
-            state_dict = torch.load(scatter_model_name, map_location='cpu')
+            state_dict = torch.load(scatter_model_name, map_location='cpu', weights_only=False)
             model.load_state_dict(state_dict)
             model = model.cpu()
         model.eval()
