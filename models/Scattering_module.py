@@ -302,7 +302,6 @@ class Scatter(torch.nn.Module):
             # print('x returned shape', x.shape)
         return x, self.wavelet_constructor
 
-
     def out_shape(self):
 
         # x * 4 moments * in

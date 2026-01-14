@@ -17,7 +17,7 @@ from torch_geometric import data
 from pysmiles import read_smiles
 
 # from models.LEGS_module import Scatter
-from models.MLP_LEGS_module import Scatter
+from models.MLP_Scattering_module import Scatter
 from rdkit import Chem
 from torch_geometric.utils import from_networkx
 
