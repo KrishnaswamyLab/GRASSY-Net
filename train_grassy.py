@@ -110,7 +110,7 @@ def get_grassy_flags(grassy_version: str) -> tuple:
 
 def main():
     parser = argparse.ArgumentParser(description='Train GRASSY model with YAML configuration')
-    parser.add_argument('--config', type=str, default='config.yaml',
+    parser.add_argument('--config', type=str, default='grassy_config.yaml',
                         help='Path to config file (default: config.yaml)')
     parser.add_argument('--override', type=str, nargs='*', default=[],
                         help='Override config values (e.g., training.n_epochs=50)')

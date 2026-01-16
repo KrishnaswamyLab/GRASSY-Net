@@ -1,4 +1,3 @@
-```markdown
 # MOSES Benchmark - GRASSY-Net Fork
 
 This is a modified copy of the [MOSES benchmark](https://github.com/molecularsets/moses) integrated into GRASSY-Net for molecular generation evaluation.
@@ -92,4 +91,3 @@ metrics = get_all_metrics(generated, train=train, test=test)
 ## Original Repository
 
 https://github.com/molecularsets/moses
-```

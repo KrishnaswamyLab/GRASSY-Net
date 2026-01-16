@@ -17,13 +17,13 @@ dataset:
 # Model architecture
 model:
   # Whether to make scattering wavelets learnable
-  trainable_scattering: false
+  trainable_scattering: true
   # Maximum graph size for scattering computation
   max_graph_size: 100
   # Nonlinearity type: "mlp" or "abs"
   #   - "mlp": Use per-wavelet MLPs 
   #   - "abs": Use absolute value
-  nonlinearity: "mlp"
+  nonlinearity: "abs"
 
 # Training settings
 training:
