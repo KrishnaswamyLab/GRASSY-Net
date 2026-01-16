@@ -58,3 +58,6 @@ data/ZINC/
 requirements.txt
 zinc12k_analysis/*.ipynb
 wandb/
+
+# External
+external/
