@@ -1,3 +1,4 @@
+```markdown
 # GRASSY-DiT
 
 **Graph Diffusion Transformer conditioned on GRASSY Scattering Moments**
@@ -10,13 +11,13 @@ Extends [torch-molecule](https://github.com/torch-molecule/torch-molecule)'s Gra
 
 GRASSY-DiT combines two key ideas:
 
-1. **GRASSY scattering moments**: A 440-dimensional structural fingerprint computed via learnable graph wavelets
+1. **GRASSY scattering moments**: A structural fingerprint computed via graph wavelets (dimension varies by dataset)
 2. **Graph-DiT**: A discrete diffusion transformer for molecular graph generation
 
 Given a target scattering signature, GRASSY-DiT generates molecules whose structure matches that signature — optionally preserving a scaffold substructure.
 
 ```
-Target Scattering [440-D] + (Optional Scaffold) → GRASSY-DiT → Molecule (SMILES)
+Target Scattering [auto-dim] + (Optional Scaffold) → GRASSY-DiT → Molecule (SMILES)
 ```
 
 ---
@@ -24,11 +25,11 @@ Target Scattering [440-D] + (Optional Scaffold) → GRASSY-DiT → Molecule (SMI
 ## Architecture
 
 ```
-                           scattering [B, 440]
+                           scattering [B, scatter_dim]
                                    ↓
                            ScatteringTokenizer
                                    ↓
-                            tokens [B, 21, D]
+                     tokens [B, num_atom_types + 11, D]
                                    ↓
 timestep t → AdaLN ──→ Self-Attn → Cross-Attn → MLP → ... → X, E
                           ↑
@@ -39,7 +40,7 @@ timestep t → AdaLN ──→ Self-Attn → Cross-Attn → MLP → ... → X, E
 
 | Component | Source | Description |
 |-----------|--------|-------------|
-| `ScatteringTokenizer` | **New** | Dual tokenization: 10 atom-type + 11 level tokens |
+| `ScatteringTokenizer` | **New** | Dual tokenization: atom-type + level tokens |
 | `CrossAttention` | **New** | Graph tokens attend to scattering tokens |
 | `SELayerWithCrossAttention` | **New** | DiT block with cross-attention added |
 | `ScatteringDenoiser` | **New** | Main model combining all components |
@@ -53,13 +54,14 @@ timestep t → AdaLN ──→ Self-Attn → Cross-Attn → MLP → ... → X, E
 
 ```
 grassy_dit/
-├── __init__.py           # Package exports
-├── model.py              # ScatteringDenoiser, ScatteringTokenizer, CrossAttention
-├── train.py              # ScatteringGraphDIT subclass + training CLI
-├── sample.py             # Sampling CLI with scaffold support
-└── data/                 # Training data
-    ├── molecules.csv         # SMILES strings
-    └── scattering_moments.npy # [N, 440] scattering vectors
+├── __init__.py               # Package exports
+├── model.py                  # ScatteringDenoiser, ScatteringTokenizer, CrossAttention
+├── train.py                  # ScatteringGraphDIT subclass + training CLI
+├── sample.py                 # Sampling CLI with scaffold support
+├── extract_scattering_fixed.py  # Extract scattering from dataset
+└── data/                     # Training data (after extraction)
+    ├── molecules.csv             # SMILES strings
+    └── scattering_moments.npy    # [N, scatter_dim] scattering vectors
 ```
 
 ---
@@ -81,7 +83,44 @@ pip install torch-scatter torch-sparse torch-geometric
 pip install torch-molecule
 
 # Other dependencies
-pip install rdkit pandas numpy
+pip install rdkit pandas numpy tqdm
+```
+
+---
+
+## Data Preparation
+
+### Step 1: Prepare Dataset
+
+For MOSES dataset:
+```bash
+# Downloads MOSES data and computes properties
+python datasets/prepare_moses_joao.py --subset 12000
+# Creates: datasets/MOSES_12K.npy, datasets/MOSES_12K_stats.npy
+```
+
+### Step 2: Extract Scattering Moments
+
+```bash
+python grassy_dit/extract_scattering_fixed.py \
+    --dataset datasets/MOSES_12K.npy \
+    --stats datasets/MOSES_12K_stats.npy \
+    --output grassy_dit/data/ \
+    --batch_size 64
+```
+
+This will:
+1. **Auto-detect atom types** from the dataset (e.g., `['Br', 'C', 'Cl', 'F', 'N', 'O', 'S']` for MOSES)
+2. **Compute scattering** with matching dimensions
+3. **Save** `molecules.csv` and `scattering_moments.npy`
+
+Example output:
+```
+Detected 7 atom types: ['Br', 'C', 'Cl', 'F', 'N', 'O', 'S']
+Scattering configuration:
+  - Wavelet scales (J): 4
+  - Moments: 4
+  - Output dimension: 308
 ```
 
 ---
@@ -95,7 +134,7 @@ pip install rdkit pandas numpy
 python -m grassy_dit.train \
     --data_dir grassy_dit/data \
     --epochs 1 \
-    --batch_size 2 \
+    --batch_size 16 \
     --hidden_size 64 \
     --num_layer 2 \
     --num_head 4 \
@@ -112,6 +151,8 @@ python -m grassy_dit.train \
     --checkpoint grassy_dit_checkpoint.pt
 ```
 
+The model **auto-detects `num_atom_types`** from the scattering dimension at training time.
+
 **Training arguments:**
 
 | Argument | Default | Description |
@@ -127,6 +168,7 @@ python -m grassy_dit.train \
 | `--num_head` | 16 | Number of attention heads |
 | `--lr` | 1e-4 | Learning rate |
 | `--checkpoint` | grassy_dit_checkpoint.pt | Output checkpoint path |
+| `--resume_from_checkpoint` | None | Path to checkpoint to resume from |
 
 ### Sampling
 
@@ -150,6 +192,7 @@ python -m grassy_dit.sample \
 python -m grassy_dit.sample \
     --checkpoint grassy_dit_checkpoint.pt \
     --scattering target_scattering.npy \
+    --molecule "COc1ccccc1N" \
     --scaffold "c1ccccc1" \
     --num_samples 5 \
     --output generated.txt
@@ -164,35 +207,45 @@ python -m grassy_dit.sample \
 | `--index` | 0 | Index of scattering vector (if file has multiple rows) |
 | `--num_samples` | 10 | Number of molecules to generate |
 | `--num_nodes` | None | Number of atoms (None = sample from training distribution) |
-| `--scaffold` | None | Scaffold SMILES to preserve during generation |
+| `--molecule` | None | Full molecule SMILES (required for scaffold/remove modes) |
+| `--scaffold` | None | SMARTS pattern to preserve during generation |
+| `--remove-atoms` | None | Comma-separated atom indices to remove |
 | `--output` | generated.txt | Output file for SMILES |
 
 ---
 
 ## How It Works
 
-### Scattering Moments (440-D)
+### Scattering Moments (Dynamic Dimension)
+
+The scattering dimension is computed as:
 
 ```
-440 = 10 atom types × 11 levels × 4 moments
+scatter_dim = num_atom_types × num_levels × num_moments
+            = num_atom_types × 11 × 4
 
-Atom types (10): C, N, O, F, S, Cl, Br, ...
-Levels (11): 1 zeroth + 4 first + 6 second order wavelets
-Moments (4): mean, variance, skew, kurtosis
+Examples:
+- MOSES (7 types: Br, C, Cl, F, N, O, S):  7 × 11 × 4 = 308
+- ZINC  (9 types):                          9 × 11 × 4 = 396
+- Custom dataset: auto-detected from SMILES
 ```
+
+**Atom types**: Auto-detected by scanning all molecules in the dataset  
+**Levels (11)**: 1 zeroth + 4 first + 6 second order wavelets  
+**Moments (4)**: mean, variance, skew, kurtosis
 
 ### Dual Tokenization
 
-The 440-D vector is reshaped into two overlapping views:
+The scattering vector is reshaped into two overlapping views:
 
 ```python
 # Atom tokens: "What's each atom type doing across all scales?"
-atom_tokens = scattering.view(B, 10, 44)  → Linear → [B, 10, D]
+atom_tokens = scattering.view(B, num_atom_types, 44)  → Linear → [B, A, D]
 
 # Level tokens: "What's happening at each scale?"  
-level_tokens = scattering.view(B, 11, 40) → Linear → [B, 11, D]
+level_tokens = scattering.view(B, 11, num_atom_types*4) → Linear → [B, 11, D]
 
-# Concat → [B, 21, D]
+# Concat → [B, A + 11, D]
 ```
 
 ### Cross-Attention
@@ -201,7 +254,7 @@ Graph tokens (atoms being generated) attend to scattering tokens:
 
 ```python
 Q = graph_tokens      # [B, N, D] - "What should I be?"
-K, V = scatter_tokens # [B, 21, D] - "Here's the target structure"
+K, V = scatter_tokens # [B, A+11, D] - "Here's the target structure"
 output = softmax(Q @ K.T) @ V
 ```
 
@@ -227,7 +280,7 @@ node_mask:       T  T  T  T  T  T  T  T  T  T  T  ...
 ```
 
 How it works:
-1. Convert scaffold SMILES to atom/bond tensors using model's atom/bond decoders
+1. Convert full molecule to graph, identify scaffold atoms via SMARTS matching
 2. At each reverse diffusion step, after the model predicts denoised atoms/bonds:
    - Overwrite scaffold positions with clean scaffold values
    - Let non-scaffold positions denoise normally
@@ -238,6 +291,7 @@ Example: Generate molecules containing a benzene ring that match target scatteri
 python -m grassy_dit.sample \
     --checkpoint model.pt \
     --scattering target.npy \
+    --molecule "COc1ccccc1N" \
     --scaffold "c1ccccc1" \
     --num_samples 10
 ```
@@ -258,16 +312,48 @@ python -m grassy_dit.sample \
 
 Your `data_dir` should contain:
 
-1. **molecules.csv**: CSV with a SMILES column
-2. **scattering_moments.npy**: `[N, 440]` array of scattering moments
+1. **molecules.csv**: CSV with a `smiles` column
+2. **scattering_moments.npy**: `[N, scatter_dim]` array of scattering moments
 
-⚠️ **Important**: Scattering data should not contain NaN values. Filter them before training.
+⚠️ **Important**: 
+- Scattering data should not contain NaN values
+- SMILES must be RDKit-parseable
+- Scattering dimension must equal `num_atom_types × 11 × 4`
 
 ```python
 # Check for NaNs
 import numpy as np
 x = np.load('scattering_moments.npy')
+print(f'Shape: {x.shape}')  # e.g., (12000, 308)
 print(f'NaNs: {np.isnan(x).sum()}')  # Should be 0
+```
+
+---
+
+## Full Pipeline Example
+
+```bash
+# 1. Prepare MOSES dataset (12K subset)
+python datasets/prepare_moses_joao.py --subset 12000
+
+# 2. Extract scattering moments
+python grassy_dit/extract_scattering_fixed.py \
+    --dataset datasets/MOSES_12K.npy \
+    --stats datasets/MOSES_12K_stats.npy \
+    --output grassy_dit/data/
+
+# 3. Train model
+python -m grassy_dit.train \
+    --data_dir grassy_dit/data \
+    --epochs 100 \
+    --checkpoint grassy_dit_checkpoint.pt
+
+# 4. Generate molecules
+python -m grassy_dit.sample \
+    --checkpoint grassy_dit_checkpoint.pt \
+    --scattering grassy_dit/data/scattering_moments.npy \
+    --index 0 \
+    --num_samples 10
 ```
 
 ---
@@ -275,10 +361,10 @@ print(f'NaNs: {np.isnan(x).sum()}')  # Should be 0
 ## Known Limitations
 
 1. **Bond types**: Only SINGLE, DOUBLE, TRIPLE, AROMATIC (no DATIVE)
-2. **Atom types**: ~10 common drug-like atoms
-3. **Molecule size**: Max ~50 atoms (configurable)
+2. **Atom types**: Limited to types present in training data
+3. **Molecule size**: Max ~50 atoms (configurable via `--max_node`)
 4. **Training data**: Model quality depends heavily on scattering data quality
-5. **Scaffold**: Must be valid SMILES parseable by RDKit
+5. **Scaffold**: Must be valid SMARTS pattern parseable by RDKit
 
 ---
 
@@ -291,4 +377,5 @@ print(f'NaNs: {np.isnan(x).sum()}')  # Should be 0
   journal={arXiv preprint arXiv:2110.06241},
   year={2021}
 }
+```
 ```

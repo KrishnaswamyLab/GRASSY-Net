@@ -46,11 +46,24 @@ class ZINCDataset(Dataset):
             self.stats = np.load(prop_stat_dict, allow_pickle=True).item()
         else:
             self.stats = None
-
+        
         self.transform = transform
-        self.num_node_features = 16  # 8 atom types + 8 pairs (C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
-        self.num_classes = len(self.prop_list)
         self.smi = list(self.tranch.keys())
+        self.atom_types = self._scan_atom_types()
+        self.atom_type_map = {atom: i for i, atom in enumerate(self.atom_types)}
+        self.num_node_features = len(self.atom_types)
+        self.num_classes = len(self.prop_list)
+        print(f"Detected {self.num_node_features} atom types: {self.atom_types}")
+    
+    def _scan_atom_types(self):
+        """Scan all molecules to find unique atom types."""
+        atom_set = set()
+        for smi in self.smi:
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                for atom in mol.GetAtoms():
+                    atom_set.add(atom.GetSymbol())
+        return sorted(list(atom_set))
 
 
     def __len__(self):
@@ -90,39 +103,13 @@ class ZINCDataset(Dataset):
         data.no_zscore_props = torch.tensor(no_zscore, dtype=torch.float32)
         data.y = torch.tensor(props, dtype=torch.float32).unsqueeze(0) # <- changed for efficiency
         # import pdb; pdb.set_trace()
-        #place node features
+        # Simple one-hot encoding using dynamic atom type map
         node_feats = []
-    
-        for i, entry in enumerate(data.element): 
-
+        for entry in data.element:
             node_feat = np.zeros(self.num_node_features)
-            
-            #one hot encoding of atoms (8 types: C, O, N, S, F, Cl, Br, I)
-            atom_type_map = {'C': 0, 'O': 1, 'N': 2, 'S': 3, 'F': 4, 'Cl': 5, 'Br': 6, 'I': 7}
-            if entry in atom_type_map:
-                node_feat[atom_type_map[entry]] = 1.
-
-            #pair encoding of atoms (8 pairs: C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
-            if entry == 'C' or entry == 'O':
-                node_feat[8] = 1.  # C-O pair
-            if entry == 'C' or entry == 'N':
-                node_feat[9] = 1.  # C-N pair
-            if entry == 'C' or entry == 'S':
-                node_feat[10] = 1.  # C-S pair
-            if entry == 'O' or entry == 'N':  # Fixed: handles both O-N and N-O
-                node_feat[11] = 1.  # N-O pair
-            if entry == 'O' or entry == 'S':
-                node_feat[12] = 1.  # O-S pair
-            if entry == 'N' or entry == 'S':
-                node_feat[13] = 1.  # N-S pair
-            if entry == 'C' or entry == 'F':
-                node_feat[14] = 1.  # C-F pair
-            if entry == 'C' or entry == 'Cl':
-                node_feat[15] = 1.  # C-Cl pair
-            # using most common pairs for now 
-
+            if entry in self.atom_type_map:
+                node_feat[self.atom_type_map[entry]] = 1.0
             node_feats.append(node_feat)
-
         data.x = torch.tensor(np.array(node_feats), dtype=torch.float32) # <- same for efficiency
         # import pdb; pdb.set_trace()
         if self.transform: 
