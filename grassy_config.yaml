@@ -40,6 +40,12 @@ training:
   #   - VAE: Variational autoencoder only (no regression)
   grassy_version: "AE+REG"
 
+# Scattering transform settings (for learnable scattering)
+scattering:
+  J: 4                 # Number of wavelet scales
+  num_moments: 4       # Number of statistical moments (1-4)
+  mlp_hidden_dim: 64   # Hidden dimension for learnable MLPs
+
 # Hardware settings
 hardware:
   n_gpus: 1
