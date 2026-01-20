@@ -90,7 +90,7 @@ class ScatteringTokenizer(nn.Module):
         self.null = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
         
 
-    def forward(self, x, train=False, force_null=False):
+    def forward(self, x, train=False, force_null=False, batch_size=None):
         """
         Args:
             x: [B, 440] scattering moments
@@ -99,10 +99,11 @@ class ScatteringTokenizer(nn.Module):
         Returns:
             tokens: [B, 21, D] dual scattering tokens
         """
-        B = x.shape[0]
-        
         if force_null:
+            B = x.shape[0] if x is not None else (batch_size or 1)
             return self.null.expand(B, -1, -1)
+        
+        B = x.shape[0]
         
         # Reshape: [B, 440] → [B, A, L, M] = [B, 10, 11, 4] -- assuming this order of extraction of moments from the GRASSY scatter model
         x = x.view(B, self.num_atom_types, self.num_levels, self.num_moments)
@@ -248,7 +249,7 @@ class ScatteringDenoiser(nn.Module):
         # Embed inputs
         x = self.x_embedder(torch.cat([x, e.reshape(B, N, -1)], dim=-1))
         c = self.t_embedder(t)
-        scatter_tokens = self.scatter_tokenizer(scattering, self.training, uncond)
+        scatter_tokens = self.scatter_tokenizer(scattering, self.training, uncond, batch_size=B)
         
         # Transformer blocks
         for block in self.blocks:

@@ -26,7 +26,9 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         t = noisy_data['t']
         scattering = noisy_data['y_t']  # [B, 440] scattering passed as y - not propery labels as in the original GraphDIT
         
-        X_pred, E_pred = self.denoiser(X_t, E_t, node_mask, t, scattering, uncond=unconditioned)
+        # Force uncond=True when scattering is None
+        force_uncond = unconditioned or (scattering is None)
+        X_pred, E_pred = self.denoiser(X_t, E_t, node_mask, t, scattering, uncond=force_uncond)
         E_pred = (E_pred + E_pred.transpose(1, 2)) / 2 # symmetrizes edge predictions - Bonds are undirected: edge (i,j) = edge (j,i)
         # Manual masking (avoids symmetry assertion)
         X_pred = X_pred * node_mask.unsqueeze(-1) # padding positions are masked out
@@ -153,11 +155,14 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         return result
     
     @torch.no_grad()
-    def generate(self, scattering, num_nodes=None, batch_size=1,
+    def generate(self, scattering=None, num_nodes=None, batch_size=1,
              scaffold_X=None, scaffold_E=None, scaffold_node_mask=None):
         """Generate with optional scaffold constraint."""
         import numpy as np
-        
+
+        # Handle unconditional generation
+        if scattering is None:
+            return super().generate(labels=None, num_nodes=num_nodes, batch_size=batch_size)
         if isinstance(scattering, np.ndarray):
             scattering = torch.from_numpy(scattering).float()
         if scattering.dim() == 1:
