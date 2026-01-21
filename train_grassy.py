@@ -2,9 +2,9 @@
 GRASSY Training Script with YAML Configuration
 
 Usage:
-    python train_from_config.py                      # Use default config.yaml
-    python train_from_config.py --config my_config.yaml  # Use custom config file
-    python train_from_config.py --config config.yaml --override training.n_epochs=50
+    python train_grassy.py                      # Use default config.yaml
+    python train_grassy.py --config my_config.yaml  # Use custom config file
+    python train_grassy.py --config config.yaml --override training.n_epochs=50
 """
 
 import os

@@ -6,9 +6,9 @@
 
 # Dataset settings
 dataset:
-  name: "ZINC12K"
-  path: "datasets/ZINC12K.npy"
-  stats_path: "datasets/ZINC12K_stats.npy"
+  name: "MOSES_12K"
+  path: "datasets/MOSES_12K.npy"
+  stats_path: "datasets/MOSES_12K_stats.npy"
   include_ki: false
 
   # Data splits

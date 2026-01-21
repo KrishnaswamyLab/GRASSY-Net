@@ -1,15 +1,19 @@
 #!/bin/bash
 
-#SBATCH --job-name=grassy
-#SBATCH --time=20:00:00
+#SBATCH --job-name=grassy_fixed_scattering
+#SBATCH --time=10:00:00
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=scavenge_gpu
+#SBATCH --partition=gpu_h200
 #SBATCH --gpus=1
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --output=./logs/slurm/%x_%j.out
 #SBATCH --error=./logs/slurm/%x_%j.err
-cd ~/project/GRASSY-Net
-module load miniconda
-conda activate mfcn
 
-python train_grassy.py
+cd ~/workspace/GRASSY-Net
+
+ml uv
+ml CUDA/12.1.1
+
+source .venv/bin/activate
+
+python train_grassy_fixed_scattering.py
