@@ -12,6 +12,8 @@ from torch_molecule.generator.graph_dit.utils import PlaceHolder
 from grassy_dit.model import ScatteringDenoiser
 
 
+# python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 20 --checkpoint_dir ./checkpoints 
+    
 class ScatteringTransformerAdapter(torch.nn.Module):
     """Wraps ScatteringDenoiser to match Transformer.forward(noisy_data, unconditioned) signature."""
     
@@ -87,8 +89,10 @@ class ScatteringTransformerAdapter(torch.nn.Module):
 class ScatteringGraphDIT(GraphDITMolecularGenerator):
     """GraphDIT with scattering moment conditioning via cross-attention."""
     
-    def __init__(self, **kwargs):
+    def __init__(self, checkpoint_dir='./checkpoints', **kwargs):
         super().__init__(**kwargs)
+        self.checkpoint_dir = checkpoint_dir
+        self._best_loss = float('inf')
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -129,6 +133,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_atom_types=getattr(self, 'num_atom_types', 16),  # Use computed value or default
             num_levels=getattr(self, 'num_levels', 11),
             num_moments=getattr(self, 'num_moments', 4),
+            device=self.device,
         )
         self.model = ScatteringTransformerAdapter(denoiser).to(self.device)
         
@@ -137,6 +142,69 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         return self.model
     
+    def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
+        """Override to save best checkpoint."""
+        losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
+        
+        # Check if this is the best epoch
+        mean_loss = np.mean(losses)
+        current_epoch = epoch + 1
+    
+        # Print epoch summary
+        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {mean_loss:.6f} - Best: {self._best_loss:.6f}")
+
+        # Log to wandb
+        if wandb.run is not None:
+            wandb.log({
+                "epoch": current_epoch,
+                "epoch_loss": mean_loss,
+                "best_loss": self._best_loss,
+            })
+            
+        if self.checkpoint_dir and mean_loss < self._best_loss:
+            self._best_loss = mean_loss
+            self._save_best_checkpoint(epoch + 1, mean_loss)
+        
+        return losses
+    
+    def _save_best_checkpoint(self, epoch, loss):
+        """Save the best checkpoint, removing previous best."""
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(self.checkpoint_dir, "checkpoint_best.pt")
+        
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "hyperparameters": {
+                "max_node": self.max_node,
+                "hidden_size": self.hidden_size,
+                "num_layer": self.num_layer,
+                "num_head": self.num_head,
+                "mlp_ratio": self.mlp_ratio,
+                "dropout": self.dropout,
+                "drop_condition": self.drop_condition,
+                "input_dim_X": self.input_dim_X,
+                "input_dim_E": self.input_dim_E,
+                "input_dim_y": self.input_dim_y,
+                "task_type": self.task_type,
+                "timesteps": self.timesteps,
+                "dataset_info": self.dataset_info,
+                "num_atom_types": getattr(self, 'num_atom_types', None),
+                "num_levels": getattr(self, 'num_levels', None),
+                "num_moments": getattr(self, 'num_moments', None),
+            },
+            "fitting_epoch": epoch,
+            "fitting_loss": self.fitting_loss,
+            "best_loss": loss,
+        }
+        
+        torch.save(checkpoint, checkpoint_path)
+        print(f"New best checkpoint at epoch {epoch} (loss: {loss:.6f})")
+        
+        if wandb.run is not None:
+            wandb.save(checkpoint_path)
+            wandb.log({"best_loss": loss, "best_epoch": epoch})
+
+
     def fit(self, X_train, y_train, X_val=None, y_val=None, **kwargs):
         """Override fit to add Wandb logging."""
         # Call parent fit which will trigger _validate_inputs and _initialize_model
@@ -217,6 +285,8 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--checkpoint', default='grassy_dit_checkpoint.pt')
     parser.add_argument('--resume_from_checkpoint', default=None, type=str, help='Path to checkpoint file to resume from')
+    parser.add_argument('--checkpoint_dir', default='checkpoints', help='Directory to save checkpoints')
+    parser.add_argument('--save_every_n_epochs', type=int, default=10, help='Save checkpoint every N epochs')
     args = parser.parse_args()
     
     # Load data
@@ -271,8 +341,10 @@ if __name__ == "__main__":
         }
     )
 
+    # Create checkpoint directory
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    # Train
+    # Train with checkpoint saving
     model = ScatteringGraphDIT(
         hidden_size=args.hidden_size,
         num_layer=args.num_layer,
@@ -280,6 +352,7 @@ if __name__ == "__main__":
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
+        checkpoint_dir=args.checkpoint_dir, 
     )
     
     # Compute num_atom_types from scattering data before initializing model (needed for checkpoint resume)

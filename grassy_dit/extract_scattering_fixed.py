@@ -9,6 +9,8 @@ Usage:
     python grassy_dit/extract_scattering_fixed.py
     python grassy_dit/extract_scattering_fixed.py --dataset datasets/ZINC12K.npy --output grassy_dit/data/
     python grassy_dit/extract_scattering_fixed.py --J 4 --moments 4
+
+    python grassy_dit/extract_scattering_fixed.py --dataset datasets/MOSES_12K.npy --stats datasets/MOSES_12K_stats.npy  --output grassy_dit/data/moses_12k
 """
 
 import argparse
