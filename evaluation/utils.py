@@ -30,7 +30,21 @@ def load_dit_model(checkpoint_path: str, device: str = "cuda"):
     """
     from grassy_dit.train import ScatteringGraphDIT
 
+    # Load checkpoint first to get num_atom_types
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
     model = ScatteringGraphDIT()
+    
+    # Infer num_atom_types from checkpoint before loading
+    if "model_state_dict" in checkpoint:
+        # Infer from scatter_tokenizer.pos shape: [1, num_atom_types + 11, hidden]
+        pos_key = "denoiser.scatter_tokenizer.pos"
+        if pos_key in checkpoint["model_state_dict"]:
+            pos_shape = checkpoint["model_state_dict"][pos_key].shape
+            model.num_atom_types = pos_shape[1] - 11  # tokens - levels
+            model.num_levels = 11
+            model.num_moments = 4
+    
     model.load_from_local(checkpoint_path)
     model.device = torch.device(device)
 
