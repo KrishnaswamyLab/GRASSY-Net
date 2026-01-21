@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #SBATCH --job-name=grassy_dit_fixed_scattering
-#SBATCH --time=1:00:00
-#SBATCH --cpus-per-task=4
-#SBATCH --partition=gpu
+#SBATCH --time=4:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --partition=gpu_h200
 #SBATCH --gpus=1
 #SBATCH --mem=128G
 #SBATCH --output=./logs/slurm/%x_%j.out
@@ -33,4 +33,4 @@ echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # Run training
-python -m grassy_dit.train --data_dir grassy_dit/data/moses_12k --epochs 100 --checkpoint_dir ./checkpoints 
+python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 100 --checkpoint_dir ./checkpoints/moses

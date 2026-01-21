@@ -15,7 +15,7 @@ import yaml
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-    # Import project-specific modules after path setup
+# Import project-specific modules after path setup
 from models.GRASSY_model import GRASSY
 from models.ScatteringTransform import GraphScatteringTransform
 from datasets.load_ZINC_tranche import ZINCDataset
@@ -154,7 +154,7 @@ def main(args):
     # Configuration
     save_dir = args.save_dir
     config_path = os.path.join(save_dir, 'config.yaml')
-    model_path = args.model_path or os.path.join(save_dir, 'best-epoch=XX-val_loss=X.XXX.ckpt')
+    model_path = args.model_path or os.path.join(save_dir, 'best-epoch=93-val_loss=0.006.ckpt')
     
     # Load config
     config = load_config(config_path)

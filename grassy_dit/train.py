@@ -144,29 +144,28 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
         """Override to save best checkpoint."""
-        losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
+        loss, loss_X, loss_E = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         
         # Check if this is the best epoch
-        mean_loss = np.mean(losses)
         current_epoch = epoch + 1
     
         # Print epoch summary
-        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {mean_loss:.6f} - Best: {self._best_loss:.6f}")
+        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {loss:.6f} - Best: {self._best_loss:.6f}")
 
         # Log to wandb
         if wandb.run is not None:
             wandb.log({
                 "epoch": current_epoch,
-                "epoch_loss": mean_loss,
+                "epoch_loss": loss,
                 "best_loss": self._best_loss,
             })
             
-        if self.checkpoint_dir and mean_loss < self._best_loss:
-            self._best_loss = mean_loss
-            self._save_best_checkpoint(epoch + 1, mean_loss)
+        if self.checkpoint_dir and loss < self._best_loss:
+            self._best_loss = loss
+            self._save_best_checkpoint(epoch + 1, loss)
         
-        return losses
-    
+        return loss, loss_X, loss_E
+
     def _save_best_checkpoint(self, epoch, loss):
         """Save the best checkpoint, removing previous best."""
         os.makedirs(self.checkpoint_dir, exist_ok=True)
