@@ -23,6 +23,7 @@ weights/
 *.json
 *.parquet
 
+
 # Logs and outputs
 logs/
 runs/
@@ -59,5 +60,11 @@ requirements.txt
 zinc12k_analysis/*.ipynb
 wandb/
 
-# External
-external/
+# But allow CSVs inside MOSES
+external/**
+!external/moses/
+!external/moses/**
+!external/moses/**/*.csv
+
+#Ignore .npy
+*.npy
