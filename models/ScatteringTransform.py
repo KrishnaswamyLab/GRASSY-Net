@@ -19,6 +19,26 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 
+class NonlinearityMLP(nn.Module):
+    """
+    Learnable MLP to replace fixed absolute value non-linearity.
+    
+    Maps input features through hidden layers to learn feature transformations.
+    """
+    
+    def __init__(self, in_channels, hidden_dim=64):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_channels),
+        )
+    
+    def forward(self, x):
+        """Apply learnable MLP transformation."""
+        return self.mlp(x)
+
+
 def gcn_norm(edge_index, edge_weight=None, num_nodes=None, dtype=None):
     """
     Compute row-normalized adjacency: D^{-1} A
@@ -149,12 +169,12 @@ def compute_moments(x, batch, num_moments=4):
 
 class GraphScatteringTransform(nn.Module):
     """
-    Fixed (non-learnable) Graph Scattering Transform.
+    Learnable Graph Scattering Transform.
 
     Computes a fixed-size representation for each graph via:
     1. Zeroth-order: low-pass filtered features
-    2. First-order: |ψ_j * x| wavelet responses at J scales
-    3. Second-order: |ψ_{j'} * |ψ_j * x|| for j' > j
+    2. First-order: |ψ_j * x| wavelet responses at J scales (via learnable MLP)
+    3. Second-order: |ψ_{j'} * |ψ_j * x|| for j' > j (via learnable MLP)
     4. Statistical moment aggregation (mean, var, skew, kurtosis)
 
     Output dimension: in_channels * (1 + J + J*(J-1)/2) * num_moments
@@ -163,14 +183,16 @@ class GraphScatteringTransform(nn.Module):
         in_channels: Number of input node features
         J: Number of wavelet scales (default: 4)
         num_moments: Number of statistical moments (1-4, default: 4)
+        mlp_hidden_dim: Hidden dimension for learnable MLPs (default: 64)
     """
 
-    def __init__(self, in_channels, J=4, num_moments=4):
+    def __init__(self, in_channels, J=4, num_moments=4, mlp_hidden_dim=64):
         super().__init__()
 
         self.in_channels = in_channels
         self.J = J
         self.num_moments = num_moments
+        self.mlp_hidden_dim = mlp_hidden_dim
 
         # Fixed diffusion operators
         self.diffuse = Diffusion()
@@ -178,6 +200,17 @@ class GraphScatteringTransform(nn.Module):
         # Wavelet scales: P^1, P^2, P^4, P^8, ... (powers of 2)
         self.scales = [2 ** j for j in range(J)]
         self.max_scale = self.scales[-1]
+
+        # Learnable MLPs for first-order wavelets (one per scale)
+        self.first_order_mlps = nn.ModuleList([
+            NonlinearityMLP(in_channels, mlp_hidden_dim) for _ in range(J)
+        ])
+
+        # Learnable MLPs for second-order wavelets (one per pair j, j')
+        feng_count = sum(1 for j in range(J) for _ in range(j + 1, J))
+        self.second_order_mlps = nn.ModuleList([
+            NonlinearityMLP(in_channels, mlp_hidden_dim) for _ in range(feng_count)
+        ])
 
         # Feng indices for second-order
         self._feng_indices = self._compute_feng_indices()
@@ -237,13 +270,15 @@ class GraphScatteringTransform(nn.Module):
         # ===== Zeroth-order: low-pass at largest scale =====
         S0 = scale_features[self.max_scale]  # [N, C]
 
-        # ===== First-order: wavelet = P^{2^{j-1}} - P^{2^j} =====
+        # ===== First-order: wavelet = P^{2^{j-1}} - P^{2^j}, then learnable MLP =====
         S1_list = []
         for j in range(self.J):
             low_scale = self.scales[j] // 2 if j > 0 else 0
             high_scale = self.scales[j]
             psi_j = scale_features[low_scale] - scale_features[high_scale]
-            S1_list.append(torch.abs(psi_j))
+            # Apply learnable MLP instead of absolute value
+            s1_j = self.first_order_mlps[j](psi_j)
+            S1_list.append(s1_j)
 
         S1 = torch.stack(S1_list, dim=1)  # [N, J, C]
 
@@ -259,8 +294,9 @@ class GraphScatteringTransform(nn.Module):
             if step in self.scales:
                 U1_scales[step] = current
 
-        # Apply second-order wavelets
+        # Apply second-order wavelets with learnable MLPs
         S2_all = []
+        mlp_idx = 0
         for j in range(self.J):
             # Extract j-th first-order channel
             col_start = j * C
@@ -274,11 +310,18 @@ class GraphScatteringTransform(nn.Module):
                     U1_scales[low_scale][:, col_start:col_end]
                     - U1_scales[high_scale][:, col_start:col_end]
                 )
-                S2_all.append(torch.abs(psi_jp_Uj))
+                
+                # Only apply MLP for valid feng pairs (j' > j)
+                if jp > j:
+                    s2_val = self.second_order_mlps[mlp_idx](psi_jp_Uj)
+                    S2_all.append(s2_val)
+                    mlp_idx += 1
 
-        # Stack and select valid pairs
-        S2_stacked = torch.stack(S2_all, dim=1)  # [N, J*J, C]
-        S2 = S2_stacked[:, self._feng_indices, :]  # [N, num_second, C]
+        # Stack second-order coefficients
+        if S2_all:
+            S2 = torch.stack(S2_all, dim=1)  # [N, num_second, C]
+        else:
+            S2 = torch.zeros((N, 0, C), device=x.device, dtype=x.dtype)
 
         # ===== Combine all coefficients =====
         S0_expanded = S0.unsqueeze(1)  # [N, 1, C]
@@ -287,7 +330,7 @@ class GraphScatteringTransform(nn.Module):
 
         # ===== Aggregate via moments =====
         scattering = compute_moments(all_coeffs, batch, self.num_moments)
-
+        import pdb; pdb.set_trace()
         return scattering
 
     def out_shape(self):
