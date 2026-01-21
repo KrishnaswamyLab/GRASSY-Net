@@ -1,11 +1,14 @@
-# GRASSY Training Configuration
+# GRASSY Training Configuration with MLP Scattering Transform
+#
+# This config uses the non-learnable GraphScatteringTransform instead of
+# a pre-trained scattering model. The scattering coefficients are computed
+# deterministically based on graph structure.
 
 # Dataset settings
 dataset:
-  name: "MOSES"
-  path: "datasets/MOSES.npy"
-  stats_path: "datasets/MOSES_stats.npy"
-  scatter_model_path: "scripts/trained_models/ZINC12K.npy"
+  name: "MOSES_12K"
+  path: "datasets/MOSES_12K.npy"
+  stats_path: "datasets/MOSES_12K_stats.npy"
   include_ki: false
 
   # Data splits
@@ -15,16 +18,24 @@ dataset:
 
   seed: 42  # Random seed for reproducibility
 
+# MLP Scattering Transform settings
+scattering:
+  J: 4              # Number of wavelet scales
+  num_moments: 4    # Statistical moments (1=mean, 2=+var, 3=+skew, 4=+kurtosis)
+  mlp_hidden_dim: 64  # Hidden dimension for MLP used in scattering
+  # Output dimension = num_node_features * (1 + J + J*(J-1)/2) * num_moments
+  # For 16 features, J=4, moments=4: 16 * 11 * 4 = 704
+
 # Model architecture
 model:
-  bottle_dim: 32       # Bottleneck dimension (latent space)
-  hidden_dim: 128      # Hidden layer dimension
-  # input_dim is computed from the dataset
+  bottle_dim: 25       # Bottleneck dimension (latent space)
+  hidden_dim: 100      # Hidden layer dimension
+  # input_dim is computed from scattering output
 
 # Training settings
 training:
   n_epochs: 100
-  batch_size: 128
+  batch_size: 100
   learning_rate: 0.001
   num_workers: 4
 
@@ -47,12 +58,11 @@ hardware:
 
 # Logging and checkpoints
 logging:
-  save_dir: "scripts/final_logs/"
+  save_dir: "outputs/"
   wandb:
     enabled: true
     entity: "grassy"
-    project: "GRASSY-ZINC12K"
-
+    project: "GRASSY-MLP"
 
   # Checkpoint settings
   checkpoint:
@@ -65,7 +75,7 @@ logging:
 early_stopping:
   enabled: false
   monitor: "val_loss"
-  patience: 5
+  patience: 10
   min_delta: 0.0
   mode: "min"
 
