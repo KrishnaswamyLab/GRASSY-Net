@@ -74,8 +74,7 @@ def get_all_metrics(gen, k=None, n_jobs=1,
         test_scaffolds = get_dataset('test_scaffolds')
         ptest_scaffolds = get_statistics('test_scaffolds')
 
-    # Fix for numpy array truth value ambiguity
-    train = get_dataset('train') if train is None else train
+    train = train or get_dataset('train')
 
     if k is None:
         k = [1000, 10000]

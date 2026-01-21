@@ -2,9 +2,9 @@
 
 # Dataset settings
 dataset:
-  name: "ZINC12K"
-  path: "datasets/ZINC12K.npy"
-  stats_path: "datasets/ZINC12K_stats.npy"
+  name: "MOSES"
+  path: "datasets/MOSES.npy"
+  stats_path: "datasets/MOSES_stats.npy"
   scatter_model_path: "scripts/trained_models/ZINC12K.npy"
   include_ki: false
 

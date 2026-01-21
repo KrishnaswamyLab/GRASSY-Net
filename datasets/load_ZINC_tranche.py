@@ -35,8 +35,12 @@ class ZINCDataset(Dataset):
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
-        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # new properites
-
+        # self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # new properites
+        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', \
+                #  'BalabanJ', 'BertzCT', 'Ipc', \
+                 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', \
+                #  'SAscore', 'FSP3'\
+                ]
         if include_ki:
             self.prop_list.append('Ki')
         

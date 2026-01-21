@@ -4,6 +4,7 @@ Replaces their property conditioning with our cross-attention to scattering toke
 """
 import torch
 import torch.nn.functional as F
+import numpy as np
 import os
 import wandb
 from torch_molecule import GraphDITMolecularGenerator
@@ -156,7 +157,6 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     def generate(self, scattering, num_nodes=None, batch_size=1,
              scaffold_X=None, scaffold_E=None, scaffold_node_mask=None):
         """Generate with optional scaffold constraint."""
-        import numpy as np
         
         if isinstance(scattering, np.ndarray):
             scattering = torch.from_numpy(scattering).float()
