@@ -60,11 +60,11 @@ requirements.txt
 zinc12k_analysis/*.ipynb
 wandb/
 
-# But allow CSVs inside MOSES
-external/**
-!external/moses/
-!external/moses/**
-!external/moses/**/*.csv
+# # But allow CSVs inside MOSES
+# external/**
+# !external/moses/
+# !external/moses/**
+# !external/moses/**/*.csv
 
 #Ignore .npy
 *.npy
