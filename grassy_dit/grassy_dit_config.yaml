@@ -1,0 +1,55 @@
+# GRASSY-DiT Training Configuration
+# Usage:
+#   python -m grassy_dit.train --config grassy_dit_config.yaml
+#   python -m grassy_dit.train --config grassy_dit_config.yaml --override training.epochs=50
+
+# Dataset configuration
+dataset:
+  name: "moses"
+  data_dir: "grassy_dit/data/moses_12k"
+  csv_file: "molecules.csv"
+  smiles_col: "smiles"
+  scatter_file: "scattering_moments.npy"
+  seed: 42
+
+scattering:
+  num_levels: 11
+  num_moments: 4
+
+# Model architecture
+model:
+  max_node: 50
+  hidden_size: 384
+  num_layer: 12
+  num_head: 16  # Note: currently forced to have same number of cross-attention heads as self-attention heads
+  mlp_ratio: 4.0
+  dropout: 0.1
+  drop_condition: 0.1
+
+# Training configuration
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-4
+
+# Checkpoint configuration
+checkpoint:
+  save_dir: "./checkpoints/moses_12k"
+  save_best: true
+  save_every_n_epochs: 10
+  resume_from: null  # Path to checkpoint to resume from
+
+# Hardware configuration
+hardware:
+  device: "auto"  # "auto", "cuda", "cpu"
+  num_workers: 4
+  pin_memory: true
+
+# Logging configuration
+logging:
+  wandb:
+    enabled: true
+    project: "GRASSY-DiT"
+    entity: "grassy"
+    name: null  # Auto-generated if null
+  verbose: true

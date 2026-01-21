@@ -6,12 +6,25 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import os
+import argparse
+import pandas as pd
 import wandb
+
 from torch_molecule import GraphDITMolecularGenerator
 from torch_molecule.generator.graph_dit.utils import PlaceHolder
+
+from rdkit import Chem
+
 from grassy_dit.model import ScatteringDenoiser
+from utils.config_utils import config_to_hparams, load_config, apply_overrides, get_grassy_flags
+import yaml
+import datetime
 
-
+from typing import Dict, Any
+# Usage:
+#     python -m grassy_dit.train --config grassy_dit/grassy_dit_config.yaml
+#     python -m grassy_dit.train --config grassy_dit_config.yaml --override training.epochs=50
+#     python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 20 
 # python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 20 --checkpoint_dir ./checkpoints 
     
 class ScatteringTransformerAdapter(torch.nn.Module):
@@ -80,7 +93,7 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         
         return loss, loss_X, loss_E
 
-    # just a toourch requirement, actual intialization of parameters is done in the ScatteringDenoiser class
+    # just a torch requirement, actual intialization of parameters is done in the ScatteringDenoiser class
     def initialize_parameters(self):
         """Required by torch-molecule's fit()."""
         pass
@@ -89,39 +102,60 @@ class ScatteringTransformerAdapter(torch.nn.Module):
 class ScatteringGraphDIT(GraphDITMolecularGenerator):
     """GraphDIT with scattering moment conditioning via cross-attention."""
     
-    def __init__(self, checkpoint_dir='./checkpoints', **kwargs):
-        super().__init__(**kwargs)
-        self.checkpoint_dir = checkpoint_dir
+    def __init__(self, config: Dict[str, Any], **kwargs):
+        model_cfg = config.get('model', {})
+        training_cfg = config.get('training', {})
+        checkpoint_cfg = config.get('checkpoint', {})
+        
+        super().__init__(
+            hidden_size=model_cfg.get('hidden_size', 384),
+            num_layer=model_cfg.get('num_layer', 12),
+            num_head=model_cfg.get('num_head', 16),
+            # mlp_ratio=model_cfg.get('mlp_ratio', 4.0),
+            # dropout=model_cfg.get('dropout', 0.1),
+            # drop_condition=model_cfg.get('drop_condition', 0.1),
+            epochs=training_cfg.get('epochs', 100),
+            batch_size=training_cfg.get('batch_size', 32),
+            learning_rate=training_cfg.get('learning_rate', 1e-4),
+            **kwargs
+        )
+        
+        self.config = config
+        self.checkpoint_dir = checkpoint_cfg.get('save_dir', './checkpoints')
+        self.save_every_n_epochs = checkpoint_cfg.get('save_every_n_epochs', 10)
         self._best_loss = float('inf')
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
         if y is not None:
-            # Compute num_atom_types from scattering dimension
-            # scattering_dim = num_atom_types * num_levels * num_moments
-            num_levels = 11
-            num_moments = 4
+            scattering_cfg = self.config.get('scattering', {})
+            num_levels = scattering_cfg.get('num_levels', 11)
+            num_moments = scattering_cfg.get('num_moments', 4)
+            
             if hasattr(y, 'shape'):
                 scattering_dim = y.shape[-1] if len(y.shape) > 1 else len(y)
             else:
-                # Handle list/array
                 scattering_dim = len(y[0]) if len(y) > 0 else len(y)
             
             num_atom_types = scattering_dim // (num_levels * num_moments)
             self.num_atom_types = num_atom_types
             self.num_levels = num_levels
             self.num_moments = num_moments
-            
+
             print(f"Detected scattering dimension: {scattering_dim}")
-            print(f"Computed num_atom_types: {num_atom_types} (should equal in_channels from Scatter model)")
+            print(f"Computed num_atom_types: {num_atom_types}")
+            
             assert scattering_dim == num_atom_types * num_levels * num_moments, \
                 f"Scattering dimension {scattering_dim} must equal num_atom_types * {num_levels} * {num_moments}"
         return X, y
+    
     
     def _initialize_model(self, model_class, checkpoint=None):
         """Override to use ScatteringDenoiser instead of Transformer."""
         if checkpoint is not None:
             self._setup_diffusion_params(checkpoint)
+        
+        model_cfg = self.config.get('model', {})
         
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
@@ -130,12 +164,14 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_heads=self.num_head,
             Xdim=self.input_dim_X,
             Edim=self.input_dim_E,
-            num_atom_types=getattr(self, 'num_atom_types', 16),  # Use computed value or default
+            num_atom_types=getattr(self, 'num_atom_types', 16),
             num_levels=getattr(self, 'num_levels', 11),
             num_moments=getattr(self, 'num_moments', 4),
             device=self.device,
         )
-        self.model = ScatteringTransformerAdapter(denoiser).to(self.device)
+        self.model = ScatteringTransformerAdapter(
+            denoiser
+        ).to(self.device)
         
         if checkpoint is not None:
             self.model.load_state_dict(checkpoint["model_state_dict"])
@@ -144,32 +180,31 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
         """Override to save best checkpoint."""
-        loss, loss_X, loss_E = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
+        losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         
-        # Check if this is the best epoch
+        # Calculate average loss for the epoch
+        avg_loss = sum(losses) / len(losses)
+        
         current_epoch = epoch + 1
-    
-        # Print epoch summary
-        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {loss:.6f} - Best: {self._best_loss:.6f}")
+        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {avg_loss:.6f} - Best: {self._best_loss:.6f}")
 
-        # Log to wandb
         if wandb.run is not None:
             wandb.log({
                 "epoch": current_epoch,
-                "epoch_loss": loss,
+                "epoch_loss": avg_loss,
                 "best_loss": self._best_loss,
             })
             
-        if self.checkpoint_dir and loss < self._best_loss:
-            self._best_loss = loss
-            self._save_best_checkpoint(epoch + 1, loss)
+        if self.checkpoint_dir and avg_loss < self._best_loss:
+            self._best_loss = avg_loss
+            self._save_best_checkpoint(epoch + 1, avg_loss)
         
-        return loss, loss_X, loss_E
+        return losses
 
     def _save_best_checkpoint(self, epoch, loss):
         """Save the best checkpoint, removing previous best."""
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        checkpoint_path = os.path.join(self.checkpoint_dir, "checkpoint_best.pt")
+        checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_best.pt")
         
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
@@ -265,44 +300,85 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
 
 if __name__ == "__main__":
-    import argparse
-    import numpy as np
-    import pandas as pd
-    import os
+
+    parser = argparse.ArgumentParser(
+        description='Train GRASSY-DiT with scattering conditioning',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+        Examples:
+            # Use config file
+            python -m grassy_dit.train --config grassy_dit_config.yaml
+            
+            # Override specific values
+            python -m grassy_dit.train --config grassy_dit_config.yaml --override training.epochs=50 model.hidden_size=512
+            
+            # Legacy CLI mode (without config file)
+            python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 20
+        """
+    )
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', required=True)
-    parser.add_argument('--csv_file', default='molecules.csv')
-    parser.add_argument('--smiles_col', default='smiles')
-    parser.add_argument('--scatter_file', default='scattering_moments.npy')
-    parser.add_argument('--max_node', type=int, default=50)
-    parser.add_argument('--hidden_size', type=int, default=384)
-    parser.add_argument('--num_layer', type=int, default=12)
-    parser.add_argument('--num_head', type=int, default=16) # notice that currently we force it to have the same number of cross attention heads as the number of self attention heads. we might wanna change that later
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--checkpoint', default='grassy_dit_checkpoint.pt')
-    parser.add_argument('--resume_from_checkpoint', default=None, type=str, help='Path to checkpoint file to resume from')
-    parser.add_argument('--checkpoint_dir', default='checkpoints', help='Directory to save checkpoints')
-    parser.add_argument('--save_every_n_epochs', type=int, default=10, help='Save checkpoint every N epochs')
+    # Config-based arguments
+    parser.add_argument('--config', type=str, default=None,
+                        help='Path to YAML config file')
+    parser.add_argument('--override', type=str, nargs='*', default=[],
+                        help='Override config values (e.g., training.epochs=50)')
+    
     args = parser.parse_args()
     
+    # =========================================================================
+    # Load and process config
+    # =========================================================================
+    print(f"Loading config from: {args.config}")
+    config = load_config(args.config)
+    
+    if args.override:
+        print("Applying overrides:")
+        config = apply_overrides(config, args.override)
+
+    # Extract config sections
+    data_cfg = config['dataset']
+    model_cfg = config['model']
+    training_cfg = config['training']
+    checkpoint_cfg = config['checkpoint']
+    wandb_cfg = config.get('wandb', {})
+
+    # =========================================================================
+    # Create checkpoint directory and save config
+    # =========================================================================
+    checkpoint_dir = config['checkpoint']['save_dir']
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    now = datetime.datetime.now()
+    date_suffix = now.strftime("%Y-%m-%d-%H-%M-%S")
+    config_save_path = os.path.join(checkpoint_dir, f'config_{date_suffix}.yaml')
+    with open(config_save_path, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    print(f"\nConfig saved to: {config_save_path}")
+
+    # =========================================================================
     # Load data
-    df = pd.read_csv(f"{args.data_dir}/{args.csv_file}")
-    smiles = df[args.smiles_col].tolist()
-    scattering = np.load(f"{args.data_dir}/{args.scatter_file}")
+    # =========================================================================
+    data_dir = data_cfg['data_dir']
+    csv_file = data_cfg['csv_file']
+    scatter_file = data_cfg['scatter_file']
+    smiles_col = data_cfg['smiles_col']
+    
+    df = pd.read_csv(os.path.join(data_dir, csv_file))
+    smiles = df[smiles_col].tolist()
+    scattering = np.load(os.path.join(data_dir, scatter_file))
+    
+    df = pd.read_csv(f"{data_dir}/{csv_file}")
+    smiles = df[smiles_col].tolist()
+    scattering = np.load(f"{data_dir}/{scatter_file}")
 
-    # removing incopmatible with the tourch.molecule model molecules 
-    from rdkit import Chem
-
+    # Filter incompatible molecules (dative bonds not supported by torch.molecule)
     valid_smiles = []
     valid_scatter = []
     for i, smi in enumerate(smiles):
         mol = Chem.MolFromSmiles(smi)
         if mol is None:
             continue
-        has_dative = any(b.GetBondType() == Chem.BondType.DATIVE for b in mol.GetBonds()) # filtering out molecules with dative bonds as they are not supported by the tourch.molecule model
+        has_dative = any(b.GetBondType() == Chem.BondType.DATIVE for b in mol.GetBonds())
         if not has_dative:
             valid_smiles.append(smi)
             valid_scatter.append(scattering[i])
@@ -314,78 +390,74 @@ if __name__ == "__main__":
     # sanity check after filtering
     assert len(smiles) > 0, "No valid molecules after filtering"
     assert len(smiles) == len(scattering), "Mismatch after filtering"
+
+
+    # =========================================================================
+    # Initialize model
+    # =========================================================================
     print("Initializing model...")
 
     # Load checkpoint if resuming
     checkpoint = None
-    if args.resume_from_checkpoint and os.path.exists(args.resume_from_checkpoint):
-        print(f"Loading checkpoint from {args.resume_from_checkpoint}")
-        checkpoint = torch.load(args.resume_from_checkpoint, map_location='cpu')
+    resume_path = checkpoint_cfg.get('resume_from')
+    if resume_path and os.path.exists(resume_path):
+        print(f"Loading checkpoint from {resume_path}")
+        checkpoint = torch.load(resume_path, map_location='cpu')
         print("Checkpoint loaded successfully")
 
     # Initialize Wandb
-    wandb.init(
-        project="GRASSY-DiT",
-        entity="grassy",
-        name=f"GraphDiT_h{args.hidden_size}_l{args.num_layer}_e{args.epochs}",
-        config={
-            "hidden_size": args.hidden_size,
-            "num_layer": args.num_layer,
-            "num_head": args.num_head,
-            "epochs": args.epochs,
-            "batch_size": args.batch_size,
-            "learning_rate": args.lr,
-            "max_node": args.max_node,
-            "resume_from_checkpoint": args.resume_from_checkpoint is not None,
-        }
-    )
+    if wandb_cfg.get('enabled', True):
+        wandb.init(
+            project=wandb_cfg.get('project', 'GRASSY-DiT'),
+            entity=wandb_cfg.get('entity', 'grassy'),
+            name=f"GraphDiT_h{model_cfg['hidden_size']}_l{model_cfg['num_layer']}_e{training_cfg['epochs']}",
+            config=config,
+        )
 
-    # Create checkpoint directory
-    os.makedirs(args.checkpoint_dir, exist_ok=True)
-
-    # Train with checkpoint saving
-    model = ScatteringGraphDIT(
-        hidden_size=args.hidden_size,
-        num_layer=args.num_layer,
-        num_head=args.num_head,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-        checkpoint_dir=args.checkpoint_dir, 
-    )
+    # Create model
+    model = ScatteringGraphDIT(config=config)
     
-    # Compute num_atom_types from scattering data before initializing model (needed for checkpoint resume)
-    num_levels = 11
-    num_moments = 4
+    # Compute num_atom_types from scattering data (needed for checkpoint resume)
+    num_levels = model_cfg.get('num_levels', 11)
+    num_moments = model_cfg.get('num_moments', 4)
     scattering_dim = scattering.shape[-1] if len(scattering.shape) > 1 else len(scattering)
     num_atom_types = scattering_dim // (num_levels * num_moments)
     model.num_atom_types = num_atom_types
     model.num_levels = num_levels
     model.num_moments = num_moments
 
-    # Load checkpoint into model if resuming
+   # Load checkpoint into model if resuming
     if checkpoint is not None:
         model._initialize_model(None, checkpoint=checkpoint)
 
-
+    # =========================================================================
+    # Train
+    # =========================================================================
     print("Model initialized. Starting training...")
-
     model.fit(X_train=smiles, y_train=scattering)
 
+
+    # =========================================================================
+    # Save final checkpoint
+    # =========================================================================
     print("Training complete. Saving checkpoint...")
-    checkpoint_path = os.path.abspath(args.checkpoint)
-    print(f"Saving checkpoint to: {checkpoint_path}")
+    final_checkpoint_path = os.path.join(checkpoint_dir, f'final_model_{date_suffix}.pt')
+    print(f"Saving checkpoint to: {final_checkpoint_path}")
+    
     try:
-        model.save_to_local(checkpoint_path)
-        print(f"Checkpoint saved successfully!")
+        model.save_to_local(final_checkpoint_path)
+        print("Checkpoint saved successfully!")
+        
         # Save to Wandb
-        wandb.save(checkpoint_path)
+        if wandb_cfg.get('enabled', True):
+            wandb.save(final_checkpoint_path)
     except Exception as e:
         print(f"ERROR saving checkpoint: {e}")
         import traceback
         traceback.print_exc()
+    
     print("Done!")
-    wandb.finish()
+    
+    if wandb_cfg.get('enabled', True):
+        wandb.finish()
 
-    # example: 
-    # python -m grassy_dit.train --data_dir datasets/microsource --epochs 100
