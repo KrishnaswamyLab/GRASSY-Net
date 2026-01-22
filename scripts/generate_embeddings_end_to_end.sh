@@ -1,10 +1,9 @@
 #!/bin/bash
 
-#SBATCH --job-name=grassy_dit_fixed_scattering
+#SBATCH --job-name=grassy_generate_embeddings
 #SBATCH --time=4:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --partition=gpu_h200
-#SBATCH --gpus=1
+#SBATCH --partition=devel
 #SBATCH --mem=128G
 #SBATCH --output=./logs/slurm/%x_%j.out
 #SBATCH --error=./logs/slurm/%x_%j.err
@@ -19,19 +18,12 @@ cd ~/workspace/GRASSY-Net
 
 # Load modules
 ml uv
-ml CUDA/12.1.1
 
 # Activate virtual environment
 source .venv/bin/activate
 
-nvidia-smi
-
-# Verify GPU is available (helpful for debugging)
-echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
-
 # Set number of workers to match CPUs
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-# Run training
-# python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 100 --checkpoint_dir ./checkpoints/moses
-python -m grassy_dit.train --config grassy_dit/grassy_dit_config.yaml
+# Run generate_embeddings
+python -m notebooks.generate_embeddings_mlp --save_dir outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29 --model_path outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29/best-epoch=74-val_loss=0.005.ckpt --save_embeddings

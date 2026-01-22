@@ -91,14 +91,18 @@ def main():
     print(f"Node features: {base_dataset.num_node_features}")
     print(f"Properties: {base_dataset.num_classes}")
 
+    # We need to add in_channels to the config to reproduce the embeddings.
+    scattering_cfg['in_channels'] = base_dataset.num_node_features
+
     # Create learnable scattering transform
     print(f"\nScattering configuration (LEARNABLE):")
     print(f"  - Wavelet scales (J): {scattering_cfg['J']}")
     print(f"  - Moments: {scattering_cfg['num_moments']}")
     print(f"  - MLP hidden dim: {scattering_cfg.get('mlp_hidden_dim', 64)}")
+    print(f"  - in channels: {scattering_cfg.get('in_channels', 16)}")
 
     scattering_transform = GraphScatteringTransform(
-        in_channels=base_dataset.num_node_features,
+        in_channels=scattering_cfg['in_channels'],
         J=scattering_cfg['J'],
         num_moments=scattering_cfg['num_moments'],
         mlp_hidden_dim=scattering_cfg.get('mlp_hidden_dim', 64),
@@ -156,6 +160,7 @@ def main():
 
     # Save config to output directory for reproducibility
     config_save_path = os.path.join(save_dir, 'config.yaml')
+
     with open(config_save_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
     print(f"Config saved to: {config_save_path}")
@@ -276,48 +281,6 @@ def main():
     # Save model to wandb
     if logger:
         logger.experiment.save(os.path.join(save_dir, f"{prefix}_model.pt"))
-
-    print("Generating embeddings for full dataset...")
-
-    scat_mom_list = []
-    prop = [[] for _ in range(base_dataset.num_classes)]
-
-    # Atom percentages
-    carbon = []
-    nitro = []
-    oxy = []
-    atom_percentage = [carbon, nitro, oxy]
-
-    for index in tqdm(range(len(full_dataset))):
-        entry = full_dataset[index]
-        scat_mom_list.append(entry[0].detach().cpu().numpy())
-        
-        # Save all properties
-        for i in range(len(entry[1])):
-            val = entry[1][i].item() if torch.is_tensor(entry[1][i]) else entry[1][i]
-            prop[i].append(val)
-        
-        # Get atom counts from original dataset
-        data = no_transform_dataset[index]
-        
-        c, n, o = 0, 0, 0
-        atom_count = 0
-        
-        for atom in data.element:
-            if atom == 'C':
-                c += 1
-            elif atom == 'N':
-                n += 1
-            elif atom == 'O':
-                o += 1
-            atom_count += 1
-        
-        carbon.append(c / atom_count if atom_count > 0 else 0)
-        nitro.append(n / atom_count if atom_count > 0 else 0)
-        oxy.append(o / atom_count if atom_count > 0 else 0)
-
-    scat_mom_list = np.array(scat_mom_list)
-    print(f"Scattering coefficients shape: {scat_mom_list.shape}")
 
     print(f"\nTraining complete! Results saved to: {save_dir}")
 

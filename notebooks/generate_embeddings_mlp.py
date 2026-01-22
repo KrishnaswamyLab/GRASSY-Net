@@ -22,6 +22,8 @@ from datasets.load_ZINC_tranche import ZINCDataset
 from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
 from utils.config_utils import config_to_hparams, load_config, get_grassy_flags
 
+# Usage:
+# python -m notebooks.generate_embeddings_mlp --save_dir outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29 --model_path outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29/best-epoch=74-val_loss=0.005.ckpt
 
 class ScatteringDataset(torch.utils.data.Dataset):
     """Wrapper dataset that applies scattering transform."""
@@ -37,16 +39,11 @@ class ScatteringDataset(torch.utils.data.Dataset):
         data = self.base_dataset[idx]
         with torch.no_grad():
             scat_coeffs = self.scattering_transform(data)
-        return scat_coeffs, data.y
-
+        return scat_coeffs.squeeze(), data.y  # Add .squeeze() to remove extra dimensions
 
 
 def create_model(config, scattering_dim, num_properties, device):
     """Create and return the GRASSY model."""
-    from models.GRASSY_model import GRASSY
-    from utils.config_utils import config_to_hparams
-    from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
-    
     training_cfg = config['training']
     grassy_version = training_cfg['grassy_version']
     kl_div, reg = get_grassy_flags(grassy_version)
@@ -98,10 +95,12 @@ def generate_scattering_coefficients(full_dataset, no_transform_dataset, num_cla
         scat_mom_list.append(entry[0].detach().cpu().numpy())
         
         # Save all properties
-        for i in range(len(entry[1])):
-            val = entry[1][i].item() if torch.is_tensor(entry[1][i]) else entry[1][i]
-            prop[i].append(val)
-        
+        # Add this debug print before the loop in generate_scattering_coefficients
+        entry = full_dataset[0]
+        y = entry[1].detach().cpu().numpy().flatten()  # Convert entire tensor to numpy and flatten it to be (num_classes,)
+        for i in range(num_classes):
+            prop[i].append(y[i])
+
         # Get atom counts from original dataset
         data = no_transform_dataset[index]
         
@@ -132,7 +131,7 @@ def generate_embeddings(model, scat_mom_list, device):
     moments = torch.Tensor(scat_mom_list).to(device)
     
     with torch.no_grad():
-        ordered_embed = model.grassy_model.embed(moments)[0]
+        ordered_embed = model.grassy.embed(moments)[0]
     
     ordered_embed_np = ordered_embed.cpu().numpy()
     print(f"Embedding shape: {ordered_embed_np.shape}")
@@ -146,7 +145,6 @@ def save_embeddings(output_dir, prefix, ordered_embed_np, scat_mom_list, prop, a
     np.save(os.path.join(output_dir, f"embedding_prop_lists_{prefix}.npy"), np.array(prop, dtype=object))
     np.save(os.path.join(output_dir, f"atom_percentages_{prefix}.npy"), np.array(atom_percentage))
     print(f"Embeddings saved to {output_dir}")
-
 
 
 def main(args):
@@ -178,11 +176,12 @@ def main(args):
     
     print(f"Loaded {len(base_dataset)} molecules")
     print(f"Node features: {base_dataset.num_node_features}")
+    print("In Channels for Scattering Transform:", scattering_cfg['in_channels'])
     print(f"Properties: {base_dataset.num_classes}")
     
     # Create scattering transform
     scattering_transform = GraphScatteringTransform(
-        in_channels=base_dataset.num_node_features,
+        in_channels=scattering_cfg['in_channels'],
         J=scattering_cfg['J'],
         num_moments=scattering_cfg['num_moments'],
         mlp_hidden_dim=scattering_cfg.get('mlp_hidden_dim', 64),
@@ -224,6 +223,7 @@ def main(args):
     atom_percentage = [carbon, nitro, oxy]
     
     if args.save_embeddings:
+        print("Saving embeddings to disk...")
         save_embeddings(output_dir, prefix, ordered_embed_np, scat_mom_list, prop, atom_percentage)
 
 

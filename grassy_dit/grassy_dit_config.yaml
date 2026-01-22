@@ -6,7 +6,7 @@
 # Dataset configuration
 dataset:
   name: "moses"
-  data_dir: "grassy_dit/data/moses_12k"
+  data_dir: "grassy_dit/data/moses"
   csv_file: "molecules.csv"
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
@@ -28,15 +28,15 @@ model:
 
 # Training configuration
 training:
-  epochs: 100
+  epochs: 20
   batch_size: 32
   learning_rate: 1.0e-4
 
 # Checkpoint configuration
 checkpoint:
-  save_dir: "./checkpoints/moses_12k"
+  save_dir: "./checkpoints/moses"
   save_best: true
-  save_every_n_epochs: 10
+  save_every_n_epochs: 2
   resume_from: null  # Path to checkpoint to resume from
 
 # Hardware configuration
