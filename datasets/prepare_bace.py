@@ -1,17 +1,22 @@
 """
 Prepare BACE dataset for GRASSY-DiT and GraphDIT training.
-Downloads BACE from PyTorch Geometric, class-balances, splits, and computes conditions.
+Downloads BACE from PyTorch Geometric, class-balances, splits, and computes properties.
 
 Outputs:
-  - datasets/BACE.npy (molecule data with properties)
+  - datasets/BACE_train.npy (train molecules with properties)
+  - datasets/BACE_val.npy (val molecules with properties)
+  - datasets/BACE_test.npy (test molecules with properties)
   - datasets/BACE_stats.npy (statistics for normalization)
   - datasets/BACE_splits.json (train/val/test indices for reproducibility)
-  - grassy_dit/data_bace/molecules.csv (SMILES list)
-  - grassy_dit/data_bace/scattering_moments.npy (scattering features)
+
+Then run extract_scattering_fixed.py on each:
+    python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_train.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_train --J 11 --moments 4
+    python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_val.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_val --J 11 --moments 4
+    python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_test.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_test --J 11 --moments 4
 
 Usage:
     python datasets/prepare_bace.py
-    python datasets/prepare_bace.py --J 11 --moments 4 --device cuda
+    python datasets/prepare_bace.py --seed 42
 """
 import argparse
 import json
@@ -24,18 +29,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import pandas as pd
-import torch
 from tqdm import tqdm
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, QED
-
-# For scattering extraction
-from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import MoleculeNet
-from models.ScatteringTransform import GraphScatteringTransform
-from datasets.load_ZINC_tranche import ZINCDataset
 
-
+#### these both are place holders that could later be replaced with a more accurate score##################
 def compute_sas(mol):
     """Compute Synthetic Accessibility Score (1-10, lower is easier)."""
     try:
@@ -45,7 +44,6 @@ def compute_sas(mol):
         try:
             # Alternative location in some RDKit versions
             from rdkit.Chem import RDConfig
-            import sys
             sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
             import sascorer
             return float(sascorer.calculateScore(mol))
@@ -54,18 +52,17 @@ def compute_sas(mol):
 
 
 def compute_scs(mol):
-    """Compute Synthetic Complexity Score using SCScore (1-5, lower is easier)."""
+    """Compute Synthetic Complexity Score (1-5, lower is easier)."""
     try:
-        # Try using scscore if available
-        from rdkit.Chem import AllChem
-        # SCScore is based on fingerprints - use a simple proxy based on complexity
-        # Full SCScore requires a trained model, so we use BertzCT as approximation
+        # SCScore approximation using BertzCT
         bertz = rdMolDescriptors.CalcBertzCT(mol)
-        # Normalize to 1-5 range (typical BertzCT ranges from 0-2000+)
+        # Normalize to 1-5 range
         scs = 1 + 4 * min(bertz / 2000, 1.0)
         return float(scs)
     except Exception:
         return float('nan')
+
+#################################################################################
 
 
 def compute_props(mol, bace_label=None):
@@ -82,7 +79,7 @@ def compute_props(mol, bace_label=None):
     if bace_label is not None:
         out['bace_activity'] = float(bace_label)
     
-    # Additional properties for evaluation
+    # Additional properties
     try:
         out['qed'] = float(QED.qed(mol))
     except Exception:
@@ -128,81 +125,10 @@ def compute_props(mol, bace_label=None):
     return out
 
 
-def extract_scattering(dataset_path, output_dir, stats_path, J, num_moments, batch_size, device):
-    """Extract scattering coefficients for all molecules."""
-    print(f"\n{'='*60}")
-    print("Extracting scattering moments...")
-    print(f"{'='*60}")
-    
-    # Setup device
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        elif torch.backends.mps.is_available():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
-    else:
-        device = torch.device(device)
-    print(f"Using device: {device}")
-
-    # Load dataset
-    dataset = ZINCDataset(dataset_path, prop_stat_dict=stats_path, include_ki=False)
-    print(f"Loaded {len(dataset)} molecules")
-    print(f"Node features: {dataset.num_node_features}")
-
-    # Create fixed scattering transform
-    scattering = GraphScatteringTransform(
-        in_channels=dataset.num_node_features,
-        J=J,
-        num_moments=num_moments,
-    ).to(device)
-    scattering.eval()
-
-    print(f"\nScattering configuration:")
-    print(f"  - Wavelet scales (J): {J}")
-    print(f"  - Moments: {num_moments}")
-    print(f"  - Output dimension: {scattering.out_shape()}")
-
-    # Create dataloader
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-    # Extract scattering coefficients
-    all_moments = []
-    with torch.no_grad():
-        for batch in tqdm(loader, desc="Extracting scattering"):
-            batch = batch.to(device)
-            moments = scattering(batch)
-            all_moments.append(moments.cpu().numpy())
-
-    scattering_coeffs = np.vstack(all_moments)
-    print(f"\nScattering coefficients shape: {scattering_coeffs.shape}")
-
-    # Save outputs
-    os.makedirs(output_dir, exist_ok=True)
-    scattering_path = os.path.join(output_dir, "scattering_moments.npy")
-    molecules_path = os.path.join(output_dir, "molecules.csv")
-
-    np.save(scattering_path, scattering_coeffs)
-    pd.DataFrame({"smiles": dataset.smi}).to_csv(molecules_path, index=False)
-
-    print(f"\nSaved to {output_dir}:")
-    print(f"  - {scattering_path}")
-    print(f"  - {molecules_path}")
-
-    return scattering_coeffs
-
-
 def main():
     parser = argparse.ArgumentParser(description='Prepare BACE dataset for GRASSY-DiT')
     parser.add_argument('--output-dir', type=str, default='datasets',
                         help='Output directory for .npy files (default: datasets)')
-    parser.add_argument('--scatter-output', type=str, default='grassy_dit/data_bace',
-                        help='Output directory for scattering (default: grassy_dit/data_bace)')
-    parser.add_argument('--J', type=int, default=11, help='Wavelet scales (default: 11)')
-    parser.add_argument('--moments', type=int, default=4, help='Statistical moments (default: 4)')
-    parser.add_argument('--batch-size', type=int, default=64, help='Batch size (default: 64)')
-    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'mps', 'cpu'])
     parser.add_argument('--seed', type=int, default=42, help='Random seed (default: 42)')
     args = parser.parse_args()
 
@@ -278,57 +204,59 @@ def main():
     print(f"Saved splits to {splits_path}")
 
     # ==========================================================================
-    # Step 4: Extract SMILES and compute properties
+    # Step 4: Load raw CSV to get SMILES
     # ==========================================================================
     print("\n" + "="*60)
-    print("Step 4: Extracting SMILES and computing properties")
+    print("Step 4: Loading SMILES from raw CSV")
     print("="*60)
     
-    out_dict = {}
-    all_smiles = []
-    skipped = 0
+    raw_path = Path('./data/BACE/raw/bace.csv')
+    if not raw_path.exists():
+        raise FileNotFoundError(f"Raw BACE CSV not found at {raw_path}. Make sure PyTorch Geometric downloaded it.")
     
-    for idx in tqdm(balanced_idx, desc="Processing molecules"):
-        data = dataset[idx]
-        smi = data.smiles if hasattr(data, 'smiles') else None
-        
-        # If SMILES not directly available, try to get from the dataset
-        if smi is None:
-            # MoleculeNet stores SMILES in the raw data
-            try:
-                raw_path = Path('./data/BACE/raw/bace.csv')
-                if raw_path.exists():
-                    df = pd.read_csv(raw_path)
-                    smiles_col = 'mol' if 'mol' in df.columns else 'smiles'
-                    smi = df.iloc[idx][smiles_col]
-            except Exception:
-                pass
-        
-        if smi is None:
-            skipped += 1
-            continue
-            
-        mol = Chem.MolFromSmiles(smi)
-        if mol is None:
-            skipped += 1
-            continue
-        
-        bace_label = data.y.item()
-        props = compute_props(mol, bace_label=bace_label)
-        out_dict[smi] = props
-        all_smiles.append(smi)
-
-    # Save dataset
-    dataset_path = f'{args.output_dir}/BACE.npy'
-    np.save(dataset_path, out_dict)
-    print(f"\nSaved {len(out_dict)} molecules to {dataset_path}")
-    print(f"Skipped {skipped} invalid molecules")
+    df_raw = pd.read_csv(raw_path)
+    smiles_col = 'mol' if 'mol' in df_raw.columns else 'smiles'
+    print(f"Loaded {len(df_raw)} molecules from {raw_path}")
 
     # ==========================================================================
-    # Step 5: Compute statistics
+    # Step 5: Process each split and save separate .npy files
     # ==========================================================================
     print("\n" + "="*60)
-    print("Step 5: Computing statistics")
+    print("Step 5: Processing splits and computing properties")
+    print("="*60)
+    
+    all_props = {}  # For computing overall stats
+    
+    for split_name, split_indices in [("train", train_idx), ("val", val_idx), ("test", test_idx)]:
+        print(f"\nProcessing {split_name} split ({len(split_indices)} molecules)...")
+        
+        out_dict = {}
+        skipped = 0
+        
+        for idx in tqdm(split_indices, desc=f"  {split_name}"):
+            data = dataset[idx]
+            smi = df_raw.iloc[idx][smiles_col]
+            
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                skipped += 1
+                continue
+            
+            bace_label = data.y.item()
+            props = compute_props(mol, bace_label=bace_label)
+            out_dict[smi] = props
+            all_props[smi] = props
+        
+        # Save this split
+        split_path = f'{args.output_dir}/BACE_{split_name}.npy'
+        np.save(split_path, out_dict)
+        print(f"  Saved {len(out_dict)} molecules to {split_path} (skipped {skipped})")
+
+    # ==========================================================================
+    # Step 6: Compute statistics (from all data for consistent normalization)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("Step 6: Computing statistics")
     print("="*60)
     
     prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'TPSA', 'NumHAcceptors', 
@@ -336,8 +264,8 @@ def main():
     stats = {}
     
     for prop in prop_list:
-        values = [out_dict[smi][prop] for smi in out_dict.keys()
-                  if prop in out_dict[smi] and not np.isnan(out_dict[smi][prop])]
+        values = [all_props[smi][prop] for smi in all_props.keys()
+                  if prop in all_props[smi] and not np.isnan(all_props[smi][prop])]
         if values:
             stats[prop] = {'mean': np.mean(values), 'std': np.std(values)}
             print(f"  {prop}: mean={stats[prop]['mean']:.3f}, std={stats[prop]['std']:.3f}")
@@ -349,34 +277,20 @@ def main():
     print(f"\nSaved statistics to {stats_path}")
 
     # ==========================================================================
-    # Step 6: Extract scattering moments
-    # ==========================================================================
-    extract_scattering(
-        dataset_path=dataset_path,
-        output_dir=args.scatter_output,
-        stats_path=stats_path,
-        J=args.J,
-        num_moments=args.moments,
-        batch_size=args.batch_size,
-        device=args.device,
-    )
-
-    # ==========================================================================
     # Summary
     # ==========================================================================
     print("\n" + "="*60)
     print("DONE! Files created:")
     print("="*60)
-    print(f"  - {dataset_path}")
+    print(f"  - {args.output_dir}/BACE_train.npy ({len(train_idx)} molecules)")
+    print(f"  - {args.output_dir}/BACE_val.npy ({len(val_idx)} molecules)")
+    print(f"  - {args.output_dir}/BACE_test.npy ({len(test_idx)} molecules)")
     print(f"  - {stats_path}")
     print(f"  - {splits_path}")
-    print(f"  - {args.scatter_output}/molecules.csv")
-    print(f"  - {args.scatter_output}/scattering_moments.npy")
-    print(f"\nDataset summary:")
-    print(f"  - Total balanced molecules: {len(balanced_idx)}")
-    print(f"  - Train: {len(train_idx)} (60%)")
-    print(f"  - Val: {len(val_idx)} (20%)")
-    print(f"  - Test: {len(test_idx)} (20%)")
+    print(f"\nNext: Extract scattering moments for each split:")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_train.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_train --J 11 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_val.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_val --J 11 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_test.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_test --J 11 --moments 4")
 
 
 if __name__ == "__main__":
