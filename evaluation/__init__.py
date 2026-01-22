@@ -1,8 +1,9 @@
 """
-MOSES Benchmark Evaluation for GRASSY-DiT.
+Evaluation Benchmarks for GRASSY-DiT.
 
-This module provides tools to evaluate GRASSY-DiT molecular generation
-against MOSES baselines (VAE, AAE, CharRNN, JTN, etc.) and DiGress.
+This module provides tools to evaluate GRASSY-DiT molecular generation:
+- MOSES Benchmark: Compare against VAE, AAE, CharRNN, JTN, etc.
+- BACE Benchmark: Compare against Graph DiT, DiGress, MOOD
 
 Supports four generation modes:
 - unconditional: DiT generates randomly (no conditioning)
@@ -12,6 +13,7 @@ Supports four generation modes:
 """
 
 from .moses_benchmark import run_benchmark, MOSESBenchmark
+from .bace_eval import BACEBenchmark
 from .load_baselines import load_baseline_samples, load_baseline_metrics
 from .utils import (
     load_dit_model,
@@ -24,6 +26,7 @@ from .utils import (
 __all__ = [
     "run_benchmark",
     "MOSESBenchmark",
+    "BACEBenchmark",
     "load_baseline_samples",
     "load_baseline_metrics",
     "load_dit_model",
