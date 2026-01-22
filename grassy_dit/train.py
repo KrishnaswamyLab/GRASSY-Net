@@ -259,6 +259,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     def generate(self, scattering, num_nodes=None, batch_size=1,
              scaffold_X=None, scaffold_E=None, scaffold_node_mask=None):
         """Generate with optional scaffold constraint."""
+        self._is_fitted = True  # Required for torch_molecule's generate() check
         
         if isinstance(scattering, np.ndarray):
             scattering = torch.from_numpy(scattering).float()

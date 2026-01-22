@@ -5,6 +5,7 @@ Generates molecules conditioned on scattering moments with optional scaffold con
 import argparse
 import numpy as np
 import torch
+import yaml
 from rdkit import Chem
 from grassy_dit.train import ScatteringGraphDIT
 
@@ -112,6 +113,7 @@ def smiles_to_scaffold(full_smiles, max_nodes, atom_decoder, bond_decoder=None,
 def main():
     parser = argparse.ArgumentParser(description='Generate molecules with GRASSY-DiT')
     parser.add_argument('--checkpoint', required=True, help='Path to model checkpoint')
+    parser.add_argument('--config', default='grassy_dit/grassy_dit_config.yaml', help='Path to config yaml')
     parser.add_argument('--scattering', required=True, help='Path to target scattering .npy file')
     parser.add_argument('--num_samples', type=int, default=10, help='Number of samples per scattering')
     parser.add_argument('--num_nodes', type=int, default=None, help='Number of atoms (None = sample from training dist)')
@@ -119,18 +121,40 @@ def main():
     parser.add_argument('--molecule', default=None, help='Full molecule SMILES (required when using --scaffold or --remove-atoms)')
     parser.add_argument('--scaffold', default=None, help='Scaffold SMARTS pattern to preserve')
     parser.add_argument('--remove-atoms', default=None, help='Comma-separated atom indices to remove (e.g., "0,1,2")')
+    parser.add_argument('--unconditional', action='store_true', help='Ignore scattering and generate unconditionally')
     parser.add_argument('--output', default='generated.txt', help='Output file')
     args = parser.parse_args()
     
-    # Load model
-    model = ScatteringGraphDIT()
-    model.load_from_local(args.checkpoint)
+    # Load model and checkpoint
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+    model = ScatteringGraphDIT(config)
     
-    # Load scattering
+    # Manual checkpoint loading (Joao's format doesn't have 'model_name' - experimntial)
+    checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    model._initialize_model(model.model_class, checkpoint)
+    model.is_fitted_ = True
+    model.fitting_loss = [0.0]
+    model.fitting_epoch = 0
+
+    hparams = checkpoint.get('hyperparameters', {})
+    if not getattr(model, "dataset_info", None):
+        model.dataset_info = hparams.get("dataset_info", None)
+        
+    # Load scattering (required unless unconditional)
     scattering = np.load(args.scattering)
     if scattering.ndim == 2:
         idx = args.index if args.index is not None else 0
         scattering = scattering[idx]
+
+    if args.unconditional:
+        # Use a dummy scattering vector and rely on CFG null path (guide_scale=0)
+        num_atom_types = model.model.denoiser.scatter_tokenizer.num_atom_types
+        num_levels = model.model.denoiser.scatter_tokenizer.num_levels
+        num_moments = model.model.denoiser.scatter_tokenizer.num_moments
+        scattering_dim = num_atom_types * num_levels * num_moments
+        scattering = np.ones(scattering_dim, dtype=np.float32)
+        model.guide_scale = 0.0
     
     # Process scaffold if provided
     scaffold_X, scaffold_E, scaffold_mask = None, None, None
