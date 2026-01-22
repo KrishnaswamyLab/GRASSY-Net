@@ -1,25 +1,15 @@
 from __future__ import print_function, division
 
-import os, math, torch, pathlib
+import torch
 
 import numpy as np
-import pandas as pd
 import networkx as nx
-import matplotlib.pyplot as plt
 
-from torch.utils.data import Dataset, DataLoader
-from torch_geometric.data import Data
-
+from torch.utils.data import Dataset
 import torch_geometric.data
-from torch_geometric import utils
-from torch_geometric import data
 
-from pysmiles import read_smiles
 
-# from models.LEGS_module import Scatter
-from models.MLP_Scattering_module import Scatter
 from rdkit import Chem
-from torch_geometric.utils import from_networkx
 
 def read_smiles_rdkit(smi):
     mol = Chem.MolFromSmiles(smi)
@@ -35,12 +25,12 @@ class ZINCDataset(Dataset):
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
-        # self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'BalabanJ', 'BertzCT', 'Ipc', 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', 'SAscore', 'FSP3'] # new properites
         self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', \
                 #  'BalabanJ', 'BertzCT', 'Ipc', \
                  'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', \
                 #  'SAscore', 'FSP3'\
                 ]
+        
         if include_ki:
             self.prop_list.append('Ki')
         
@@ -50,11 +40,24 @@ class ZINCDataset(Dataset):
             self.stats = np.load(prop_stat_dict, allow_pickle=True).item()
         else:
             self.stats = None
-
+        
         self.transform = transform
-        self.num_node_features = 16  # 8 atom types + 8 pairs (C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
-        self.num_classes = len(self.prop_list)
         self.smi = list(self.tranch.keys())
+        self.atom_types = self._scan_atom_types()
+        self.atom_type_map = {atom: i for i, atom in enumerate(self.atom_types)}
+        self.num_node_features = len(self.atom_types)
+        self.num_classes = len(self.prop_list)
+        print(f"Detected {self.num_node_features} atom types: {self.atom_types}")
+    
+    def _scan_atom_types(self):
+        """Scan all molecules to find unique atom types."""
+        atom_set = set()
+        for smi in self.smi:
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                for atom in mol.GetAtoms():
+                    atom_set.add(atom.GetSymbol())
+        return sorted(list(atom_set))
 
 
     def __len__(self):
@@ -94,39 +97,13 @@ class ZINCDataset(Dataset):
         data.no_zscore_props = torch.tensor(no_zscore, dtype=torch.float32)
         data.y = torch.tensor(props, dtype=torch.float32).unsqueeze(0) # <- changed for efficiency
         # import pdb; pdb.set_trace()
-        #place node features
+        # Simple one-hot encoding using dynamic atom type map
         node_feats = []
-    
-        for i, entry in enumerate(data.element): 
-
+        for entry in data.element:
             node_feat = np.zeros(self.num_node_features)
-            
-            #one hot encoding of atoms (8 types: C, O, N, S, F, Cl, Br, I)
-            atom_type_map = {'C': 0, 'O': 1, 'N': 2, 'S': 3, 'F': 4, 'Cl': 5, 'Br': 6, 'I': 7}
-            if entry in atom_type_map:
-                node_feat[atom_type_map[entry]] = 1.
-
-            #pair encoding of atoms (8 pairs: C-O, C-N, C-S, N-O, O-S, N-S, C-F, C-Cl)
-            if entry == 'C' or entry == 'O':
-                node_feat[8] = 1.  # C-O pair
-            if entry == 'C' or entry == 'N':
-                node_feat[9] = 1.  # C-N pair
-            if entry == 'C' or entry == 'S':
-                node_feat[10] = 1.  # C-S pair
-            if entry == 'O' or entry == 'N':  # Fixed: handles both O-N and N-O
-                node_feat[11] = 1.  # N-O pair
-            if entry == 'O' or entry == 'S':
-                node_feat[12] = 1.  # O-S pair
-            if entry == 'N' or entry == 'S':
-                node_feat[13] = 1.  # N-S pair
-            if entry == 'C' or entry == 'F':
-                node_feat[14] = 1.  # C-F pair
-            if entry == 'C' or entry == 'Cl':
-                node_feat[15] = 1.  # C-Cl pair
-            # using most common pairs for now 
-
+            if entry in self.atom_type_map:
+                node_feat[self.atom_type_map[entry]] = 1.0
             node_feats.append(node_feat)
-
         data.x = torch.tensor(np.array(node_feats), dtype=torch.float32) # <- same for efficiency
         # import pdb; pdb.set_trace()
         if self.transform: 
@@ -134,41 +111,15 @@ class ZINCDataset(Dataset):
         else:
             return data
 
-
-class Scattering(object):
-
-    def __init__(self, scatter_model_name=None):
-
-        model = Scatter(16, trainable_scattering=False,max_graph_size=100)  # 16 features: 8 atoms + 8 pairs
-        if scatter_model_name == None:
-            raise ValueError("Please specify a pretrained scatter module. If you'd like to use an untrained model, specify\
-            scatter_model_name='untrained'. Otherwise, use the .npy file of the model")
-        elif scatter_model_name != 'untrained':
-            # Load to CPU first (works regardless of where model was saved)
-            state_dict = torch.load(scatter_model_name, map_location='cpu', weights_only=False)
-            model.load_state_dict(state_dict)
-            model = model.cpu()
-        model.eval()
-        self.model = model
-            
-    def __call__(self, sample):
-
-        props = sample.y
-        to_return = self.model(sample)
-        
-        return to_return[0][0].detach(), sample.y[0]
-
-
-
 def mol_to_pyg(mol):
     """
     Converts an RDKit molecule to a PyTorch Geometric Data object.
     """
 
-    # --- 1️⃣ Extract element symbols ---
+    # ---  Extract element symbols ---
     elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
 
-    # --- 2️⃣ Create edge index (both directions for undirected graphs) ---
+    # --- Create edge index (both directions for undirected graphs) ---
     edge_index = []
     edge_weight = []
 
@@ -183,7 +134,7 @@ def mol_to_pyg(mol):
     edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
     edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
 
-    # --- 3️⃣ One-hot encode atom types ---
+    # --- One-hot encode atom types ---
     # unique_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'Br', 'I', 'P', 'H']
     # node_feats = []
     # for e in elements:
@@ -191,15 +142,15 @@ def mol_to_pyg(mol):
     #     node_feats.append(feat)
     # x = torch.tensor(node_feats, dtype=torch.float32)
 
-    # --- 4️⃣ Assemble Data object ---
-    data = Data(
+    # --- Assemble Data object ---
+    data = torch_geometric.data.Data(
         # x=x,
         edge_index=edge_index,
         weight=edge_weight,
         num_nodes=mol.GetNumAtoms(),
     )
 
-    # --- 5️⃣ Store element labels for convenience ---
+    # --- Store element labels for convenience ---
     data.element = elements
 
     return data
@@ -212,8 +163,6 @@ def from_networkx_custom(G):
     Args:
         G (networkx.Graph or networkx.DiGraph): A networkx graph.
     """
-    
-    import networkx as nx
 
     G = nx.convert_node_labels_to_integers(G)
     G = G.to_directed() if not nx.is_directed(G) else G

@@ -193,8 +193,13 @@ class ScatteringDenoiser(nn.Module):
     
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
-                 num_atom_types=16, num_levels=11, num_moments=4):
+                 num_atom_types=16, num_levels=11, num_moments=4,device=None):
         super().__init__()
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+        print(f"Using device: {device}")
+        self.device = device
         self.max_n_nodes = max_n_nodes
         self.hidden_size = hidden_size
         

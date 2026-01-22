@@ -330,7 +330,7 @@ class GraphScatteringTransform(nn.Module):
 
         # ===== Aggregate via moments =====
         scattering = compute_moments(all_coeffs, batch, self.num_moments)
-        import pdb; pdb.set_trace()
+        
         return scattering
 
     def out_shape(self):
