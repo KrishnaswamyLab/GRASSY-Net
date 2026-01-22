@@ -30,7 +30,7 @@ from torch_geometric.loader import DataLoader
 
 
 from models.GRASSY_model import GRASSY
-from models.ScatteringTransform import GraphScatteringTransform
+from models.MLP_ScatteringTransform import GraphScatteringTransform
 from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
 from datasets.load_ZINC_tranche import ZINCDataset
 

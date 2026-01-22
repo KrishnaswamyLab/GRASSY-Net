@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=grassy_dit_fixed_scattering
-#SBATCH --time=4:00:00
-#SBATCH --cpus-per-task=8
+#SBATCH --time=8:00:00
+#SBATCH --cpus-per-task=32
 #SBATCH --partition=gpu_h200
 #SBATCH --gpus=1
 #SBATCH --mem=128G

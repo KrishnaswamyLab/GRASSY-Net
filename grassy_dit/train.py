@@ -180,6 +180,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
         """Override to save best checkpoint."""
+        print(f"Starting epoch {epoch}...", flush=True)
+        
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         
         # Calculate average loss for the epoch

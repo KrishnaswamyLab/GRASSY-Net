@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 # Import project-specific modules after path setup
 from models.GRASSY_model import GRASSY
-from models.ScatteringTransform import GraphScatteringTransform
+from models.MLP_ScatteringTransform import GraphScatteringTransform
 from datasets.load_ZINC_tranche import ZINCDataset
 from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
 from utils.config_utils import config_to_hparams, load_config, get_grassy_flags

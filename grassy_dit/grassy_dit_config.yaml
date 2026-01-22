@@ -29,7 +29,7 @@ model:
 # Training configuration
 training:
   epochs: 20
-  batch_size: 32
+  batch_size: 128
   learning_rate: 1.0e-4
 
 # Checkpoint configuration
@@ -37,7 +37,7 @@ checkpoint:
   save_dir: "./checkpoints/moses"
   save_best: true
   save_every_n_epochs: 2
-  resume_from: null  # Path to checkpoint to resume from
+  resume_from: "./checkpoints/moses/final_model_2026-01-22-03-56-53.pt"  # Path to checkpoint to resume from
 
 # Hardware configuration
 hardware:
