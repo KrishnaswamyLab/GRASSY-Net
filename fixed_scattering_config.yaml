@@ -9,7 +9,6 @@ dataset:
   name: "BACE"
   path: "datasets/BACE_train.npy"
   stats_path: "datasets/BACE_stats.npy"
-  include_ki: false
 
   # Data splits
   train_size: 10000

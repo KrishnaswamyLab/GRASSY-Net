@@ -11,8 +11,6 @@ dataset:
   test_path: "datasets/BACE_test.npy"
   val_path: "datasets/BACE_val.npy"
   stats_path: "datasets/BACE_stats.npy"
-  include_ki: false
-
   seed: 42  # Random seed for reproducibility
 
 # Fixed Scattering Transform settings
@@ -24,14 +22,13 @@ scattering:
 
 # Model architecture
 model:
-  bottle_dim: 25       # Bottleneck dimension (latent space)
-  hidden_dim: 100      # Hidden layer dimension
-  # input_dim is computed from scattering output
+  bottle_dim: 32       # Bottleneck dimension (latent space)
+  hidden_dim: 128      # Hidden layer dimension
 
 # Training settings
 training:
   n_epochs: 100
-  batch_size: 100
+  batch_size: 32
   learning_rate: 0.001
   num_workers: 4
 

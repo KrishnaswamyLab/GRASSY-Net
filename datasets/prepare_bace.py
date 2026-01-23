@@ -217,9 +217,9 @@ def main():
     print(f"  - {stats_path}")
     print(f"  - {splits_path}")
     print(f"\nNext: Extract scattering moments for each split:")
-    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_train.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_train --J 11 --moments 4")
-    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_val.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_val --J 11 --moments 4")
-    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_test.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_test --J 11 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_train.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_train --J 4 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_val.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_val --J 4 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset datasets/BACE_test.npy --stats datasets/BACE_stats.npy --output grassy_dit/data_bace_test --J 4 --moments 4")
 
 
 if __name__ == "__main__":

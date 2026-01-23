@@ -8,10 +8,8 @@ and generates embeddings for visualization.
 Usage:
     python evaluate_grassy.py --checkpoint outputs/BACE_fixed_.../best-epoch-*.ckpt --config outputs/BACE_fixed_.../config.yaml
 
-    python -m notebooks.evaluate_grassy --checkpoint outputs/BACE_fixed_regress_nokld_2026-01-22-20-36-14/best-epoch=15-val_loss=0.812.ckpt --config outputs/BACE_fixed_regress_nokld_2026-01-22-20-36-14/config.yaml
-    
-    python evaluate_grassy.py --checkpoint model.ckpt --config config.yaml --test_path datasets/BACE_test.npy
-    python evaluate_grassy.py --checkpoint model.ckpt --config config.yaml --output_dir eval_results/
+    python -m notebooks.evaluate_grassy --checkpoint outputs/BACE_fixed_regress_nokld_2026-01-22-21-16-05/best-epoch=98-val_loss=0.138.ckpt --config outputs/BACE_fixed_regress_nokld_2026-01-22-21-16-05/config.yaml
+
 """
 
 import os
@@ -379,7 +377,6 @@ def main():
 
     # Load datasets
     stats_path = dataset_cfg.get('stats_path')
-    include_ki = dataset_cfg.get('include_ki', False)
     
     datasets = {}
     base_datasets = {}
@@ -398,8 +395,7 @@ def main():
         base_datasets[split] = ZINCDataset(
             path,
             prop_stat_dict=stats_path,
-            transform=None,
-            include_ki=include_ki
+            transform=None
         )
         print(f"  Loaded {len(base_datasets[split])} molecules")
 

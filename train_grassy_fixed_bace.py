@@ -13,7 +13,6 @@ Usage:
 import os
 import datetime
 import argparse
-from types import SimpleNamespace
 
 import yaml
 import numpy as np
@@ -132,7 +131,7 @@ def main():
     val_path = dataset_cfg['val_path']
     test_path = dataset_cfg['test_path']
     stats_path = dataset_cfg.get('stats_path')
-    include_ki = dataset_cfg.get('include_ki', False)
+
 
     print(f"  - Train: {train_path}")
     print(f"  - Val: {val_path}")
@@ -141,20 +140,17 @@ def main():
     train_base_dataset = ZINCDataset(
         train_path,
         prop_stat_dict=stats_path,
-        transform=None,
-        include_ki=include_ki
+        transform=None
     )
     val_base_dataset = ZINCDataset(
         val_path,
         prop_stat_dict=stats_path,
-        transform=None,
-        include_ki=include_ki
+        transform=None
     )
     test_base_dataset = ZINCDataset(
         test_path,
         prop_stat_dict=stats_path,
-        transform=None,
-        include_ki=include_ki
+        transform=None
     )
     
     print(f"\nLoaded datasets:")
