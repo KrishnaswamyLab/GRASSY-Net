@@ -26,7 +26,7 @@ from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 
 from models.ScatteringTransform import GraphScatteringTransform
-from datasets.load_ZINC_tranche import ZINCDataset
+from datasets.ZINCDataset import ZINCDataset
 
 
 def extract_scattering(
@@ -150,7 +150,7 @@ def main():
         "--J",
         type=int,
         default=4,
-        help="Number of wavelet scales (default: 4)",
+        help="Number of wavelet scales (default: 11)",
     )
     parser.add_argument(
         "--moments",

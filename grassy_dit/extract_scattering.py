@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from torch_geometric.loader import DataLoader
 from models.LEGS_module import Scatter
-from datasets.load_ZINC_tranche import ZINCDataset
+from datasets.ZINCDataset import ZINCDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

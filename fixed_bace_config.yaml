@@ -7,14 +7,11 @@
 # Dataset settings
 dataset:
   name: "BACE"
-  path: "datasets/BACE_train.npy"
+  train_path: "datasets/BACE_train.npy"
+  test_path: "datasets/BACE_test.npy"
+  val_path: "datasets/BACE_val.npy"
   stats_path: "datasets/BACE_stats.npy"
   include_ki: false
-
-  # Data splits
-  train_size: 10000
-  val_size: 1000
-  # test_size is computed as: len(dataset) - train_size - val_size
 
   seed: 42  # Random seed for reproducibility
 
