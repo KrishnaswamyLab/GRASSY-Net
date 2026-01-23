@@ -16,17 +16,30 @@ def load_model_from_checkpoint(checkpoint_path, config_path, device="cpu", scatt
     model = ScatteringGraphDIT(config)
     model.device = torch.device(device)
 
+    # Load checkpoint early so we can infer dimensions if scattering file is missing
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    scattering_cfg = config.get('scattering', {})
+    J = scattering_cfg.get('J', 4)
+    num_levels = 1 + J + J * (J - 1) // 2
+    num_moments = scattering_cfg.get('num_moments', 4)
+
     if scattering_path is not None:
         scattering_data = np.load(scattering_path)
-        scattering_cfg = config.get('scattering', {})
-        J = scattering_cfg.get('J', 4)
-        num_levels = 1 + J + J * (J - 1) // 2
-        num_moments = scattering_cfg.get('num_moments', 4)
         model.num_atom_types = scattering_data.shape[-1] // (num_levels * num_moments)
-        model.num_levels = num_levels
-        model.num_moments = num_moments
+    else:
+        state = checkpoint.get("model_state_dict", {})
+        level_proj_w = state.get("denoiser.scatter_tokenizer.level_proj.weight")
+        pos = state.get("denoiser.scatter_tokenizer.pos")
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+        if level_proj_w is not None:
+            model.num_atom_types = level_proj_w.shape[1] // num_moments
+        elif pos is not None:
+            model.num_atom_types = pos.shape[1] - num_levels
+
+    model.num_levels = num_levels
+    model.num_moments = num_moments
+
     model._initialize_model(model.model_class, checkpoint)
     model.is_fitted_ = True
     model.fitting_loss = [0.0]

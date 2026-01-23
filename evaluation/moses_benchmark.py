@@ -19,11 +19,10 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -34,8 +33,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "external" / "moses"))
 
+# Import model loading from grassy_dit.sample (same as bace_eval.py)
+from grassy_dit.sample import load_model_from_checkpoint, build_dummy_scattering
+
 from evaluation.utils import (
-    load_dit_model,
     load_grassy_vae,
     load_scattering_model,
     get_conditioning,
@@ -58,6 +59,9 @@ from evaluation.load_baselines import (
 # Output directory
 RESULTS_DIR = Path(__file__).parent / "results"
 
+# Default paths
+DEFAULT_CONFIG = PROJECT_ROOT / "grassy_dit" / "grassy_dit_config.yaml"
+
 
 class MOSESBenchmark:
     """
@@ -73,6 +77,8 @@ class MOSESBenchmark:
         dit_checkpoint: str,
         grassy_checkpoint: Optional[str] = None,
         scattering_checkpoint: Optional[str] = None,
+        scattering_data_path: Optional[str] = None,
+        config_path: Optional[str] = None,
         device: str = "cuda",
         n_jobs: int = 4,
     ):
@@ -83,15 +89,26 @@ class MOSESBenchmark:
             dit_checkpoint: Path to trained GRASSY-DiT checkpoint
             grassy_checkpoint: Path to GRASSY VAE (for full-pipeline/latent-sample)
             scattering_checkpoint: Path to learnable scattering (None = fixed)
+            scattering_data_path: Path to scattering .npy file (to infer model dimensions)
+            config_path: Path to config yaml (default: grassy_dit/grassy_dit_config.yaml)
             device: Computation device
             n_jobs: Number of workers for metric computation
         """
         self.device = device if torch.cuda.is_available() else "cpu"
         self.n_jobs = n_jobs
 
-        # Load models
+        # Use defaults if not provided
+        if config_path is None:
+            config_path = str(DEFAULT_CONFIG)
+
+        # Load DiT model using same approach as bace_eval.py
         print(f"Loading DiT model from {dit_checkpoint}...")
-        self.dit_model = load_dit_model(dit_checkpoint, self.device)
+        self.dit_model = load_model_from_checkpoint(
+            checkpoint_path=dit_checkpoint,
+            config_path=config_path,
+            device=self.device,
+            scattering_path=scattering_data_path,
+        )
 
         self.grassy_vae = None
         if grassy_checkpoint is not None:
@@ -175,18 +192,22 @@ class MOSESBenchmark:
                     batch_size=current_batch_size,
                 )
             else:
-                # Unconditional generation - dummy scattering + CFG null path
-                tokenizer = self.dit_model.model.denoiser.scatter_tokenizer
-                scattering_dim = tokenizer.num_atom_types * tokenizer.num_levels * tokenizer.num_moments
-                dummy_scattering = torch.ones(current_batch_size, scattering_dim, device=self.device)
-                original_guide_scale = self.dit_model.guide_scale
+                # Unconditional generation - use build_dummy_scattering helper
+                dummy = build_dummy_scattering(self.dit_model)
+                batch_scattering = torch.tensor(
+                    np.repeat(dummy[None, :], current_batch_size, axis=0),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                original_guide_scale = getattr(self.dit_model, "guide_scale", None)
                 self.dit_model.guide_scale = 0.0
                 smiles_batch = self.dit_model.generate(
-                    scattering=dummy_scattering,
+                    scattering=batch_scattering,
                     num_nodes=None,
                     batch_size=current_batch_size,
                 )
-                self.dit_model.guide_scale = original_guide_scale
+                if original_guide_scale is not None:
+                    self.dit_model.guide_scale = original_guide_scale
 
             # Filter None values
             valid_smiles = [s for s in smiles_batch if s is not None]
@@ -213,7 +234,7 @@ class MOSESBenchmark:
         from moses.metrics import get_all_metrics
 
         print(f"\nComputing MOSES metrics for {len(generated_smiles)} molecules...")
-        ensure_moses_stats()  
+        ensure_moses_stats()
 
         metrics = get_all_metrics(
             gen=generated_smiles,
@@ -334,7 +355,7 @@ class MOSESBenchmark:
 
         # Save results
         results_path = output_dir / f"moses_benchmark_{mode}_{timestamp}.json"
-        
+
         # Convert numpy types to native Python types for JSON serialization
         def convert_to_native(obj):
             if isinstance(obj, np.floating):
@@ -350,7 +371,7 @@ class MOSESBenchmark:
             return obj
 
         results_native = convert_to_native(results)
-        
+
         with open(results_path, "w") as f:
             json.dump(results_native, f, indent=2)
         print(f"\nSaved results to {results_path}")
@@ -368,6 +389,8 @@ def run_benchmark(**kwargs) -> Dict:
         dit_checkpoint=kwargs.pop("dit_checkpoint"),
         grassy_checkpoint=kwargs.pop("grassy_checkpoint", None),
         scattering_checkpoint=kwargs.pop("scattering_checkpoint", None),
+        scattering_data_path=kwargs.pop("scattering_data_path", None),
+        config_path=kwargs.pop("config_path", None),
         device=kwargs.pop("device", "cuda"),
         n_jobs=kwargs.pop("n_jobs", 4),
     )
@@ -429,6 +452,16 @@ Examples:
         "--scattering-checkpoint",
         default=None,
         help="Path to learnable scattering model (uses fixed GraphScatteringTransform if not provided)",
+    )
+    parser.add_argument(
+        "--scattering-data",
+        default=None,
+        help="Path to scattering .npy file to infer model dimensions (default: grassy_dit/data/scattering_moments.npy)",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config yaml (default: grassy_dit/grassy_dit_config.yaml)",
     )
 
     # Generation settings
@@ -520,6 +553,8 @@ Examples:
         dit_checkpoint=args.dit_checkpoint,
         grassy_checkpoint=args.grassy_checkpoint,
         scattering_checkpoint=args.scattering_checkpoint,
+        scattering_data_path=args.scattering_data,
+        config_path=args.config,
         device=args.device,
         n_jobs=args.n_jobs,
     )
