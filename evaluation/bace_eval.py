@@ -25,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "external" / "moses"))
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
 
-from grassy_dit.sample import load_model_from_checkpoint
+from grassy_dit.sample import build_dummy_scattering, load_model_from_checkpoint, smiles_to_scaffold
 
 # Output directory
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -142,6 +142,135 @@ class BACEBenchmark:
 
         print(f"Generated {len(all_smiles)} molecules")
         return all_smiles
+
+    def _canonicalize_smiles(self, smiles: str) -> Optional[str]:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return None
+        return Chem.MolToSmiles(mol)
+
+    def _prepare_scaffold(self, smiles: str, remove_indices: Optional[List[int]]):
+        scaffold_X, scaffold_E, scaffold_mask, node_mask, n_atoms = smiles_to_scaffold(
+            smiles,
+            self.model.max_node,
+            self.model.dataset_info["atom_decoder"],
+            self.model.dataset_info.get("bond_decoder", None),
+            scaffold_pattern=None,
+            remove_indices=remove_indices,
+            num_nodes=None,
+        )
+        scaffold_X = scaffold_X.unsqueeze(0)
+        scaffold_E = scaffold_E.unsqueeze(0)
+        scaffold_mask = scaffold_mask.unsqueeze(0)
+        return scaffold_X, scaffold_E, scaffold_mask, n_atoms
+
+    def _generate_with_scaffold(
+        self,
+        scattering: torch.Tensor,
+        num_nodes: int,
+        batch_size: int,
+        scaffold_X: Optional[torch.Tensor],
+        scaffold_E: Optional[torch.Tensor],
+        scaffold_mask: Optional[torch.Tensor],
+        unconditional: bool,
+    ) -> List[str]:
+        if unconditional:
+            dummy = build_dummy_scattering(self.model)
+            scattering = torch.tensor(
+                np.repeat(dummy[None, :], batch_size, axis=0),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            prev_guide = getattr(self.model, "guide_scale", None)
+            self.model.guide_scale = 0.0
+        else:
+            prev_guide = None
+
+        try:
+            smiles_batch = self.model.generate(
+                scattering=scattering,
+                num_nodes=num_nodes,
+                batch_size=batch_size,
+                scaffold_X=scaffold_X,
+                scaffold_E=scaffold_E,
+                scaffold_node_mask=scaffold_mask,
+            )
+        finally:
+            if prev_guide is not None:
+                self.model.guide_scale = prev_guide
+
+        return [s for s in smiles_batch if s is not None]
+
+    def reconstruction_eval(
+        self,
+        num_molecules: int,
+        attempts: int = 3,
+        remove_indices: Optional[List[int]] = None,
+    ) -> Dict[str, float]:
+        if num_molecules <= 0:
+            return {}
+
+        rng_indices = np.random.choice(len(self.test_smiles), num_molecules, replace=False)
+
+        results = {
+            "with_moments": 0,
+            "without_moments": 0,
+        }
+
+        for idx in rng_indices:
+            ref_smiles = self.test_smiles[idx]
+            ref_canon = self._canonicalize_smiles(ref_smiles)
+            if ref_canon is None:
+                continue
+
+            scattering = self.test_scattering[idx]
+            scattering_batch = torch.tensor(
+                np.repeat(scattering[None, :], attempts, axis=0),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            scaffold_X = scaffold_E = scaffold_mask = None
+            n_atoms = None
+            if remove_indices is not None:
+                scaffold_X, scaffold_E, scaffold_mask, n_atoms = self._prepare_scaffold(
+                    ref_smiles, remove_indices
+                )
+                scaffold_X = scaffold_X.expand(attempts, -1, -1)
+                scaffold_E = scaffold_E.expand(attempts, -1, -1, -1)
+                scaffold_mask = scaffold_mask.expand(attempts, -1)
+
+            num_nodes = n_atoms if n_atoms is not None else Chem.MolFromSmiles(ref_smiles).GetNumAtoms()
+
+            with_moments = self._generate_with_scaffold(
+                scattering=scattering_batch,
+                num_nodes=num_nodes,
+                batch_size=attempts,
+                scaffold_X=scaffold_X,
+                scaffold_E=scaffold_E,
+                scaffold_mask=scaffold_mask,
+                unconditional=False,
+            )
+            with_match = any(self._canonicalize_smiles(s) == ref_canon for s in with_moments)
+            results["with_moments"] += int(with_match)
+
+            without_moments = self._generate_with_scaffold(
+                scattering=scattering_batch,
+                num_nodes=num_nodes,
+                batch_size=attempts,
+                scaffold_X=scaffold_X,
+                scaffold_E=scaffold_E,
+                scaffold_mask=scaffold_mask,
+                unconditional=True,
+            )
+            without_match = any(self._canonicalize_smiles(s) == ref_canon for s in without_moments)
+            results["without_moments"] += int(without_match)
+
+        return {
+            "count": num_molecules,
+            "with_moments_rate": results["with_moments"] / num_molecules,
+            "without_moments_rate": results["without_moments"] / num_molecules,
+        }
 
     def score_single_molecule_similarity(
         self,
@@ -362,6 +491,8 @@ class BACEBenchmark:
         output_dir: Optional[str] = None,
         single_index: Optional[int] = None,
         single_samples: int = 1,
+        recon_samples: int = 0,
+        recon_attempts: int = 3,
     ) -> Dict:
         if output_dir is None:
             output_dir = RESULTS_DIR
@@ -390,6 +521,26 @@ class BACEBenchmark:
                 f"max={single_similarity['tanimoto_max']:.4f},",
                 f"FragMetric={single_similarity['frag_similarity']:.4f}",
             )
+
+        recon_results = {}
+        if recon_samples > 0:
+            print("\nRunning reconstruction eval...")
+            recon_results["remove_2_4_6_8"] = self.reconstruction_eval(
+                num_molecules=recon_samples,
+                attempts=recon_attempts,
+                remove_indices=[2, 4, 6, 8],
+            )
+            recon_results["no_scaffold"] = self.reconstruction_eval(
+                num_molecules=recon_samples,
+                attempts=recon_attempts,
+                remove_indices=None,
+            )
+            print("Reconstruction results:")
+            for name, vals in recon_results.items():
+                print(
+                    f"  {name}: with moments={vals.get('with_moments_rate', 0):.4f}, "
+                    f"without moments={vals.get('without_moments_rate', 0):.4f}"
+                )
 
         samples_path = output_dir / f"bace_generated_{timestamp}.txt"
         with open(samples_path, "w") as f:
@@ -425,6 +576,7 @@ class BACEBenchmark:
             "baselines": BACE_BASELINES,
             "comparison_table": comparison_table,
             "single_similarity": single_similarity,
+            "reconstruction": recon_results,
         }
 
         results_path = output_dir / f"bace_metrics_{timestamp}.json"
@@ -526,6 +678,18 @@ def main():
         default=1,
         help="Number of samples for per-molecule similarity (default: 1)",
     )
+    parser.add_argument(
+        "--recon-samples",
+        type=int,
+        default=0,
+        help="Number of molecules to run reconstruction eval (default: 0 = skip)",
+    )
+    parser.add_argument(
+        "--recon-attempts",
+        type=int,
+        default=3,
+        help="Generations per molecule for reconstruction eval (default: 3)",
+    )
 
     args = parser.parse_args()
 
@@ -546,6 +710,8 @@ def main():
         output_dir=args.output_dir,
         single_index=args.single_index,
         single_samples=args.single_samples,
+        recon_samples=args.recon_samples,
+        recon_attempts=args.recon_attempts,
     )
 
 
