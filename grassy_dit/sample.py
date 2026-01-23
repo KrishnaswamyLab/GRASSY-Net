@@ -129,6 +129,16 @@ def main():
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
     model = ScatteringGraphDIT(config)
+
+    # Set num_atom_types from scattering file before loading checkpoint
+    scattering_data = np.load(args.scattering)
+    scattering_cfg = config.get('scattering', {})
+    J = scattering_cfg.get('J', 4)
+    num_levels = 1 + J + J*(J-1)//2
+    num_moments = scattering_cfg.get('num_moments', 4)
+    model.num_atom_types = scattering_data.shape[-1] // (num_levels * num_moments)
+    model.num_levels = num_levels
+    model.num_moments = num_moments
     
     # Manual checkpoint loading (Joao's format doesn't have 'model_name' - experimntial)
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
