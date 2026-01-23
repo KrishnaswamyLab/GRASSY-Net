@@ -10,6 +10,51 @@ from rdkit import Chem
 from grassy_dit.train import ScatteringGraphDIT
 
 
+def load_model_from_checkpoint(checkpoint_path, config_path, device="cpu", scattering_path=None):
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    model = ScatteringGraphDIT(config)
+    model.device = torch.device(device)
+
+    if scattering_path is not None:
+        scattering_data = np.load(scattering_path)
+        scattering_cfg = config.get('scattering', {})
+        J = scattering_cfg.get('J', 4)
+        num_levels = 1 + J + J * (J - 1) // 2
+        num_moments = scattering_cfg.get('num_moments', 4)
+        model.num_atom_types = scattering_data.shape[-1] // (num_levels * num_moments)
+        model.num_levels = num_levels
+        model.num_moments = num_moments
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model._initialize_model(model.model_class, checkpoint)
+    model.is_fitted_ = True
+    model.fitting_loss = [0.0]
+    model.fitting_epoch = 0
+
+    hparams = checkpoint.get('hyperparameters', {})
+    if not getattr(model, "dataset_info", None):
+        model.dataset_info = hparams.get("dataset_info", None)
+
+    return model
+
+
+def load_scattering_vector(scattering_path, index=None):
+    scattering = np.load(scattering_path)
+    if scattering.ndim == 2:
+        idx = index if index is not None else 0
+        scattering = scattering[idx]
+    return scattering
+
+
+def build_dummy_scattering(model):
+    num_atom_types = model.model.denoiser.scatter_tokenizer.num_atom_types
+    num_levels = model.model.denoiser.scatter_tokenizer.num_levels
+    num_moments = model.model.denoiser.scatter_tokenizer.num_moments
+    scattering_dim = num_atom_types * num_levels * num_moments
+    return np.ones(scattering_dim, dtype=np.float32)
+
+
 def smiles_to_scaffold(full_smiles, max_nodes, atom_decoder, bond_decoder=None,
                        scaffold_pattern=None, remove_indices=None, num_nodes=None):
     """
