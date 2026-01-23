@@ -53,7 +53,7 @@ python train_learnable_scattering.py
 - Loading inside a script:
 
 ```python
-dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy', include_ki=False)
+dataset = ZINCDataset(f'datasets/fields_1.npy', prop_stat_dict=f'datasets/fields_1_stats.npy')
 # pass smiles/props to dataset creation used by train_learnable_scattering
 ```
 

@@ -377,7 +377,6 @@ def main():
 
     # Load datasets
     stats_path = dataset_cfg.get('stats_path')
-    include_ki = dataset_cfg.get('include_ki', False)
     
     datasets = {}
     base_datasets = {}
@@ -396,8 +395,7 @@ def main():
         base_datasets[split] = ZINCDataset(
             path,
             prop_stat_dict=stats_path,
-            transform=None,
-            include_ki=include_ki
+            transform=None
         )
         print(f"  Loaded {len(base_datasets[split])} molecules")
 

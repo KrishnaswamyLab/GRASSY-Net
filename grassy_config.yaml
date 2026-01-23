@@ -9,7 +9,6 @@ dataset:
   name: "MOSES_12K"
   path: "datasets/MOSES_12K.npy"
   stats_path: "datasets/MOSES_12K_stats.npy"
-  include_ki: false
 
   # Data splits
   train_size: 10000

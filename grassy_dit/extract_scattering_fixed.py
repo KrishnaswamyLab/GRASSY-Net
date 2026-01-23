@@ -64,7 +64,7 @@ def extract_scattering(
 
     # Load dataset
     print(f"Loading dataset from: {dataset_path}")
-    dataset = ZINCDataset(dataset_path, prop_stat_dict=stats_path, include_ki=False)
+    dataset = ZINCDataset(dataset_path, prop_stat_dict=stats_path)
     print(f"Loaded {len(dataset)} molecules")
     print(f"Node features: {dataset.num_node_features}")
 

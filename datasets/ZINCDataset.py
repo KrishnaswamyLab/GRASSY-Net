@@ -22,13 +22,10 @@ def read_smiles_rdkit(smi):
 class ZINCDataset(Dataset):
     """ZINC Tranch data"""
 
-    def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
+    def __init__(self, file_name, transform=None, prop_stat_dict=None):
         
 
         self.prop_list = PROPERTIES_TO_COMPUTE.copy()
-        
-        if include_ki:
-            self.prop_list.append('Ki')
         
         self.tranch = np.load(file_name, allow_pickle=True).item()
         

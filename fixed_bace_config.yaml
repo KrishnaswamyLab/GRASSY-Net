@@ -11,8 +11,6 @@ dataset:
   test_path: "datasets/BACE_test.npy"
   val_path: "datasets/BACE_val.npy"
   stats_path: "datasets/BACE_stats.npy"
-  include_ki: false
-
   seed: 42  # Random seed for reproducibility
 
 # Fixed Scattering Transform settings

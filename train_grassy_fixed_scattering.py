@@ -129,8 +129,7 @@ def main():
     base_dataset = ZINCDataset(
         dataset_cfg['path'],
         prop_stat_dict=dataset_cfg.get('stats_path'),
-        transform=None,
-        include_ki=dataset_cfg.get('include_ki', False)
+        transform=None
     )
     print(f"Loaded {len(base_dataset)} molecules")
     print(f"Node features: {base_dataset.num_node_features}")

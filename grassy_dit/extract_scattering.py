@@ -15,7 +15,7 @@ from datasets.ZINCDataset import ZINCDataset
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load dataset and trained scatter model
-dataset = ZINCDataset('datasets/ZINC12K.npy', prop_stat_dict='datasets/ZINC12K_stats.npy', include_ki=False)
+dataset = ZINCDataset('datasets/ZINC12K.npy', prop_stat_dict='datasets/ZINC12K_stats.npy')
 scatter = Scatter(in_channels=dataset.num_node_features, trainable_laziness=False).to(device)
 scatter.load_state_dict(torch.load('scripts/trained_models/ZINC12K.npy', map_location=device))
 scatter.eval()
