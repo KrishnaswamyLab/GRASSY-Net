@@ -13,7 +13,6 @@ Usage:
 import os
 import datetime
 import argparse
-from types import SimpleNamespace
 
 import yaml
 import numpy as np

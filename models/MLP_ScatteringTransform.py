@@ -1,7 +1,7 @@
 """
 Graph Scattering Transform for PyTorch Geometric
 
-Implements fixed (non-learnable) graph wavelets via diffusion-based scattering transforms.
+Implements graph wavelets via diffusion-based scattering transforms.
 Based on:
 - Geometric Scattering Networks (Gao et al., 2019)
 
