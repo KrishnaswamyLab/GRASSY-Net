@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=moses_grassy_dit_fixed_scattering
-#SBATCH --time=16:00:00
-#SBATCH --cpus-per-task=32
+#SBATCH --job-name=bace_grassy_dit_fixed_scattering
+#SBATCH --time=6:00:00
+#SBATCH --cpus-per-task=4
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --output=./logs/slurm/%x_%j.out
 #SBATCH --error=./logs/slurm/%x_%j.err
 
@@ -34,4 +34,4 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # Run training
 # python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 100 --checkpoint_dir ./checkpoints/moses
-python -m grassy_dit.train --config grassy_dit/grassy_dit_config.yaml
+python -m grassy_dit.train --config grassy_dit/bace_grassy_dit_config.yaml

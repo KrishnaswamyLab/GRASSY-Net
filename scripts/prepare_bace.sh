@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=prepare-moses
+#SBATCH --job-name=prepare-bace
 #SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --partition=devel
@@ -12,4 +12,4 @@ cd ~/workspace/GRASSY-Net
 
 source .venv/bin/activate
 
-python datasets/prepare_moses.py 
+python -m datasets.prepare_bace
