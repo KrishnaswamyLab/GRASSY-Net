@@ -11,7 +11,8 @@ import pandas as pd
 import wandb
 
 from torch_molecule import GraphDITMolecularGenerator
-from torch_molecule.generator.graph_dit.utils import PlaceHolder
+from torch_molecule.generator.graph_dit.utils import PlaceHolder, to_dense
+from torch_geometric.loader import DataLoader
 
 from rdkit import Chem
 
@@ -180,29 +181,74 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         return self.model
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
-        """Override to save best checkpoint."""
+        """Override to add validation and save best checkpoint."""
         print(f"Starting epoch {epoch}...", flush=True)
         
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
-        
-        # Calculate average loss for the epoch
-        avg_loss = sum(losses) / len(losses)
-        
+        avg_train_loss = sum(losses) / len(losses)
         current_epoch = epoch + 1
-        print(f"Epoch {current_epoch}/{self.epochs} - Loss: {avg_loss:.6f} - Best: {self._best_loss:.6f}")
-
+        
+        # Save checkpoint FIRST if train loss improved
+        if self.checkpoint_dir and avg_train_loss < self._best_loss:
+            self._best_loss = avg_train_loss
+            self._save_best_checkpoint(current_epoch, avg_train_loss)
+        
+        # Run validation every N epochs (if val data exists)
+        val_loss = None
+        val_every = getattr(self, '_val_every_n_epochs', 1)
+        if getattr(self, '_val_smiles', None) is not None and current_epoch % val_every == 0:
+            val_loss = self._compute_val_loss()
+            if val_loss is not None and self.checkpoint_dir and val_loss < self._best_loss:
+                self._best_loss = val_loss
+                self._save_best_checkpoint(current_epoch, val_loss)
+        
+        # Logging
+        loss_str = f"Epoch {current_epoch}/{self.epochs} - Train: {avg_train_loss:.6f}"
+        if val_loss is not None:
+            loss_str += f" - Val: {val_loss:.6f}"
+        loss_str += f" - Best: {self._best_loss:.6f}"
+        print(loss_str)
+        
         if wandb.run is not None:
-            wandb.log({
-                "epoch": current_epoch,
-                "epoch_loss": avg_loss,
-                "best_loss": self._best_loss,
-            })
-            
-        if self.checkpoint_dir and avg_loss < self._best_loss:
-            self._best_loss = avg_loss
-            self._save_best_checkpoint(epoch + 1, avg_loss)
+            log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_loss": self._best_loss}
+            if val_loss is not None:
+                log_dict["val_loss"] = val_loss
+            wandb.log(log_dict)
         
         return losses
+
+    @torch.no_grad()
+    def _compute_val_loss(self):
+        """Compute validation loss using parent's data processing methods."""
+        if self._val_smiles is None or len(self._val_smiles) == 0:
+            return None
+        
+        val_dataset = self._convert_to_pytorch_data(self._val_smiles, self._val_scattering)
+        if len(val_dataset) == 0:
+            print("Warning: No valid validation samples after conversion")
+            return None
+            
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
+        
+        self.model.eval()
+        total_loss = 0.0
+        num_batches = 0
+        active_index = self.dataset_info["active_index"]
+        
+        for batched_data in val_loader:
+            batched_data = batched_data.to(self.device)
+            data_x = F.one_hot(batched_data.x, num_classes=118).float()[:, active_index]
+            data_edge_attr = F.one_hot(batched_data.edge_attr, num_classes=5).float()
+            dense_data, node_mask = to_dense(data_x, batched_data.edge_index, data_edge_attr, batched_data.batch, self.max_node)
+            dense_data = dense_data.mask(node_mask)
+            X, E = dense_data.X, dense_data.E
+            noisy_data = self.apply_noise(X, E, batched_data.y, node_mask)
+            loss, _, _ = self.model.compute_loss(noisy_data, true_X=X, true_E=E, lw_X=self.lw_X, lw_E=self.lw_E)
+            total_loss += loss.item()
+            num_batches += 1
+        
+        self.model.train()
+        return total_loss / num_batches if num_batches > 0 else None
 
     def _save_best_checkpoint(self, epoch, loss):
         """Save the best checkpoint, removing previous best."""
@@ -242,18 +288,24 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             wandb.log({"best_loss": loss, "best_epoch": epoch})
 
 
-    def fit(self, X_train, y_train, X_val=None, y_val=None, **kwargs):
-        """Override fit to add Wandb logging."""
+    def fit(self, X_train, y_train, X_val=None, y_val=None, val_every_n_epochs=1, **kwargs):
+        """Override fit to add validation and Wandb logging."""
+        # Store validation data for use in _train_epoch
+        self._val_smiles = X_val
+        self._val_scattering = y_val
+        self._val_every_n_epochs = val_every_n_epochs
+        
         # Call parent fit which will trigger _validate_inputs and _initialize_model
         result = super().fit(X_train=X_train, y_train=y_train, **kwargs)
             
         # Log hyperparameters
-        if hasattr(self, 'num_atom_types'):
+        if hasattr(self, 'num_atom_types') and wandb.run is not None:
             wandb.config.update({
                 "num_atom_types": self.num_atom_types,
                 "num_levels": self.num_levels,
                 "num_moments": self.num_moments,
                 "scattering_dim": self.num_atom_types * self.num_levels * self.num_moments,
+                "val_size": len(X_val) if X_val is not None else 0,
             })
         
         return result
@@ -395,6 +447,36 @@ if __name__ == "__main__":
     assert len(smiles) > 0, "No valid molecules after filtering"
     assert len(smiles) == len(scattering), "Mismatch after filtering"
 
+    # =========================================================================
+    # Load validation data (optional)
+    # =========================================================================
+    val_smiles, val_scattering = None, None
+    val_data_dir = data_cfg.get('val_data_dir')
+    val_every_n_epochs = data_cfg.get('val_every_n_epochs', 1)
+    
+    if val_data_dir:
+        val_csv = data_cfg.get('val_csv_file') or csv_file
+        val_scatter = data_cfg.get('val_scatter_file') or scatter_file
+        
+        print(f"Loading validation data from: {val_data_dir}")
+        df_val = pd.read_csv(os.path.join(val_data_dir, val_csv))
+        val_smiles_raw = df_val[smiles_col].tolist()
+        val_scattering_raw = np.load(os.path.join(val_data_dir, val_scatter))
+        
+        # Filter validation molecules (same as training)
+        valid_val_smiles, valid_val_scatter = [], []
+        for i, smi in enumerate(val_smiles_raw):
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+            has_dative = any(b.GetBondType() == Chem.BondType.DATIVE for b in mol.GetBonds())
+            if not has_dative:
+                valid_val_smiles.append(smi)
+                valid_val_scatter.append(val_scattering_raw[i])
+        
+        val_smiles = valid_val_smiles
+        val_scattering = np.array(valid_val_scatter)
+        print(f"Validation: {len(val_smiles)} molecules after filtering")
 
     # =========================================================================
     # Initialize model
@@ -438,7 +520,7 @@ if __name__ == "__main__":
     # Train
     # =========================================================================
     print("Model initialized. Starting training...")
-    model.fit(X_train=smiles, y_train=scattering)
+    model.fit(X_train=smiles, y_train=scattering, X_val=val_smiles, y_val=val_scattering, val_every_n_epochs=val_every_n_epochs)
 
 
     # =========================================================================

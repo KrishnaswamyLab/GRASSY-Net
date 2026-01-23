@@ -11,6 +11,11 @@ dataset:
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
   seed: 42
+  # Validation data (optional - leave null to use train loss for checkpointing)
+  val_data_dir: null
+  val_csv_file: null
+  val_scatter_file: null
+  val_every_n_epochs: 1
 
 scattering:
   J: 4
