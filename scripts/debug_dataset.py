@@ -3,7 +3,7 @@
 Run from repo root:
     python scripts/debug_dataset.py
 """
-from datasets.load_ZINC_tranche import ZINCDataset
+from datasets.ZINCDataset import ZINCDataset
 import torch
 
 def inspect(tranch_file, n=10):

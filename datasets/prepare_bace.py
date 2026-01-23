@@ -21,11 +21,7 @@ Usage:
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import pandas as pd
@@ -34,93 +30,26 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, QED
 from torch_geometric.datasets import MoleculeNet
 
-#### these both are place holders that could later be replaced with a more accurate score##################
-def compute_sas(mol):
-    """Compute Synthetic Accessibility Score (1-10, lower is easier)."""
-    try:
-        from rdkit.Contrib.SA_Score import sascorer
-        return float(sascorer.calculateScore(mol))
-    except Exception:
-        try:
-            # Alternative location in some RDKit versions
-            from rdkit.Chem import RDConfig
-            sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
-            import sascorer
-            return float(sascorer.calculateScore(mol))
-        except Exception:
-            return float('nan')
-
-
-def compute_scs(mol):
-    """Compute Synthetic Complexity Score (1-5, lower is easier)."""
-    try:
-        # SCScore approximation using BertzCT
-        bertz = rdMolDescriptors.CalcBertzCT(mol)
-        # Normalize to 1-5 range
-        scs = 1 + 4 * min(bertz / 2000, 1.0)
-        return float(scs)
-    except Exception:
-        return float('nan')
-
-#################################################################################
-
+from datasets.property_utils import compute_sas, compute_scs, PROPERTIES_TO_COMPUTE, PROPERTY_REGISTRY
+# At the top of your file, define a registry of available properties
 
 def compute_props(mol, bace_label=None):
-    """Compute properties for a molecule."""
+    """Compute properties for a molecule based on PROPERTIES_TO_COMPUTE list."""
     out = {}
     
-    # SAS - Synthetic Accessibility Score
-    out['SAS'] = compute_sas(mol)
+    for prop_name in PROPERTIES_TO_COMPUTE:
+        if prop_name not in PROPERTY_REGISTRY:
+            print(f"Warning: Unknown property '{prop_name}'")
+            continue
+        compute_fn, _ = PROPERTY_REGISTRY[prop_name]
+        try:
+            out[prop_name] = float(compute_fn(mol))
+        except Exception:
+            out[prop_name] = float('nan')
     
-    # SCS - Synthetic Complexity Score
-    out['SCS'] = compute_scs(mol)
-    
-    # BACE activity label
+    # Special case: BACE activity label (always include if provided)
     if bace_label is not None:
         out['bace_activity'] = float(bace_label)
-    
-    # Additional properties
-    try:
-        out['qed'] = float(QED.qed(mol))
-    except Exception:
-        out['qed'] = float('nan')
-    
-    try:
-        out['MolWt'] = float(Descriptors.MolWt(mol))
-    except Exception:
-        out['MolWt'] = float('nan')
-    
-    try:
-        mw = out['MolWt']
-        num_H = sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()])
-        out['HeavyAtomMolWt'] = mw - num_H * 1.00794 if not np.isnan(mw) else float('nan')
-    except Exception:
-        out['HeavyAtomMolWt'] = float('nan')
-    
-    try:
-        out['TPSA'] = float(rdMolDescriptors.CalcTPSA(mol))
-    except Exception:
-        out['TPSA'] = float('nan')
-    
-    try:
-        out['NumHAcceptors'] = float(rdMolDescriptors.CalcNumHBA(mol))
-    except Exception:
-        out['NumHAcceptors'] = float('nan')
-    
-    try:
-        out['NumHDonors'] = float(rdMolDescriptors.CalcNumHBD(mol))
-    except Exception:
-        out['NumHDonors'] = float('nan')
-    
-    try:
-        out['RingCount'] = float(mol.GetRingInfo().NumRings())
-    except Exception:
-        out['RingCount'] = float('nan')
-    
-    try:
-        out['MolLogP'] = float(Descriptors.MolLogP(mol))
-    except Exception:
-        out['MolLogP'] = float('nan')
     
     return out
 
@@ -210,7 +139,7 @@ def main():
     print("Step 4: Loading SMILES from raw CSV")
     print("="*60)
     
-    raw_path = Path('./data/BACE/raw/bace.csv')
+    raw_path = Path('./data/bace/raw/bace.csv')
     if not raw_path.exists():
         raise FileNotFoundError(f"Raw BACE CSV not found at {raw_path}. Make sure PyTorch Geometric downloaded it.")
     
@@ -259,8 +188,8 @@ def main():
     print("Step 6: Computing statistics")
     print("="*60)
     
-    prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', 'TPSA', 'NumHAcceptors', 
-                 'NumHDonors', 'RingCount', 'MolLogP', 'SAS', 'SCS']
+    prop_list = PROPERTIES_TO_COMPUTE
+
     stats = {}
     
     for prop in prop_list:

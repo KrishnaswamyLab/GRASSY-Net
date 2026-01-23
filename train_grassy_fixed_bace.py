@@ -5,9 +5,9 @@ This script trains the GRASSY model using the fixed (non-learnable) GraphScatter
 Since the scattering has no learnable parameters, coefficients are computed once before training.
 
 Usage:
-    python train_grassy_fixed_scattering.py                                    # Use default config
-    python train_grassy_fixed_scattering.py --config my_config.yaml            # Use custom config
-    python train_grassy_fixed_scattering.py --config config.yaml --override training.n_epochs=50
+    python train_grassy_fixed_bace.py                                    # Use default config
+    python train_grassy_fixed_bace.py --config my_config.yaml            # Use custom config
+    python train_grassy_fixed_bace.py --config config.yaml --override training.n_epochs=50
 """
 
 import os
@@ -31,6 +31,7 @@ from models.ScatteringTransform import GraphScatteringTransform
 from datasets.ZINCDataset import ZINCDataset
 
 from utils.config_utils import load_config, apply_overrides, config_to_hparams, get_grassy_flags
+
 
 class FixedScatteringTransform:
     """
@@ -85,8 +86,8 @@ class ScatteringDataset(torch.utils.data.Dataset):
 
 def main():
     parser = argparse.ArgumentParser(description='Train GRASSY with fixed scattering (YAML configuration)')
-    parser.add_argument('--config', type=str, default='fixed_scattering_config.yaml',
-                        help='Path to config file (default: fixed_scattering_config.yaml)')
+    parser.add_argument('--config', type=str, default='fixed_bace_config.yaml',
+                        help='Path to config file (default: fixed_bace_config.yaml)')
     parser.add_argument('--override', type=str, nargs='*', default=[],
                         help='Override config values (e.g., training.n_epochs=50)')
     args = parser.parse_args()
@@ -124,17 +125,45 @@ def main():
     print(f"  - Alpha (reg weight): {alpha}")
     print(f"  - Beta (KL weight): {beta}")
 
-    # Load base dataset (without scattering transform)
-    print(f"\nLoading dataset: {dataset_cfg['name']}")
-    base_dataset = ZINCDataset(
-        dataset_cfg['path'],
-        prop_stat_dict=dataset_cfg.get('stats_path'),
+    # Load train, val, and test datasets from separate files
+    print(f"\nLoading datasets: {dataset_cfg['name']}")
+    
+    train_path = dataset_cfg['train_path']
+    val_path = dataset_cfg['val_path']
+    test_path = dataset_cfg['test_path']
+    stats_path = dataset_cfg.get('stats_path')
+    include_ki = dataset_cfg.get('include_ki', False)
+
+    print(f"  - Train: {train_path}")
+    print(f"  - Val: {val_path}")
+    print(f"  - Test: {test_path}")
+
+    train_base_dataset = ZINCDataset(
+        train_path,
+        prop_stat_dict=stats_path,
         transform=None,
-        include_ki=dataset_cfg.get('include_ki', False)
+        include_ki=include_ki
     )
-    print(f"Loaded {len(base_dataset)} molecules")
-    print(f"Node features: {base_dataset.num_node_features}")
-    print(f"Properties: {base_dataset.num_classes}")
+    val_base_dataset = ZINCDataset(
+        val_path,
+        prop_stat_dict=stats_path,
+        transform=None,
+        include_ki=include_ki
+    )
+    test_base_dataset = ZINCDataset(
+        test_path,
+        prop_stat_dict=stats_path,
+        transform=None,
+        include_ki=include_ki
+    )
+    
+    print(f"\nLoaded datasets:")
+    print(f"  - Train: {len(train_base_dataset)} molecules")
+    print(f"  - Val: {len(val_base_dataset)} molecules")
+    print(f"  - Test: {len(test_base_dataset)} molecules")
+    print(f"  - Total: {len(train_base_dataset) + len(val_base_dataset) + len(test_base_dataset)} molecules")
+    print(f"Node features: {train_base_dataset.num_node_features}")
+    print(f"Properties: {train_base_dataset.num_classes}")
 
     # Create fixed scattering transform
     print(f"\nScattering configuration:")
@@ -142,45 +171,39 @@ def main():
     print(f"  - Moments: {scattering_cfg['num_moments']}")
 
     scattering_transform = FixedScatteringTransform(
-        in_channels=base_dataset.num_node_features,
+        in_channels=train_base_dataset.num_node_features,
         J=scattering_cfg['J'],
         num_moments=scattering_cfg['num_moments'],
     )
     scattering_dim = scattering_transform.out_shape()
     print(f"  - Output dimension: {scattering_dim}")
 
-    # Pre-compute scattering coefficients
+    # Pre-compute scattering coefficients for each split
     print("\nPre-computing scattering coefficients...")
-    full_dataset = ScatteringDataset(base_dataset, scattering_transform, show_progress=True)
+    train_dataset = ScatteringDataset(train_base_dataset, scattering_transform, show_progress=True)
+    val_dataset = ScatteringDataset(val_base_dataset, scattering_transform, show_progress=True)
+    test_dataset = ScatteringDataset(test_base_dataset, scattering_transform, show_progress=True)
 
-    # Data splits
-    train_size = dataset_cfg['train_size']
-    val_size = dataset_cfg['val_size']
-    test_size = len(full_dataset) - train_size - val_size
-
-    print(f"\nDataset splits: train={train_size}, val={val_size}, test={test_size}")
-
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        full_dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(dataset_cfg['seed'])
-    )
+    print(f"\nDataset sizes after scattering:")
+    print(f"  - Train: {len(train_dataset)}")
+    print(f"  - Val: {len(val_dataset)}")
+    print(f"  - Test: {len(test_dataset)}")
 
     # Create data loaders
     train_loader = torch.utils.data.DataLoader(
-        train_set,
+        train_dataset,
         batch_size=training_cfg['batch_size'],
         shuffle=True,
         num_workers=training_cfg['num_workers']
     )
     valid_loader = torch.utils.data.DataLoader(
-        val_set,
+        val_dataset,
         batch_size=training_cfg['batch_size'],
         shuffle=False,
         num_workers=training_cfg['num_workers']
     )
     test_loader = torch.utils.data.DataLoader(
-        test_set,
+        test_dataset,
         batch_size=training_cfg['batch_size'],
         shuffle=False,
         num_workers=training_cfg['num_workers']
@@ -247,8 +270,8 @@ def main():
         print("Early stopping: disabled")
 
     # Get input dimensions from dataset
-    input_dim = len(train_set[0][0])
-    num_properties = len(train_set[0][1])
+    input_dim = len(train_dataset[0][0])
+    num_properties = len(train_dataset[0][1])
     len_epoch = len(train_loader)
 
     print(f"\nModel dimensions:")
@@ -327,61 +350,69 @@ def main():
     if logger:
         logger.experiment.save(os.path.join(save_dir, f"{prefix}_model.npy"))
 
-    # Generate and save embeddings
-    print("\nGenerating embeddings for full dataset...")
-    no_transform_dataset = ZINCDataset(dataset_cfg['path'])
+    # Generate and save embeddings for all splits
+    print("\nGenerating embeddings for all datasets...")
+    
+    all_datasets = {
+        'train': (train_dataset, train_base_dataset),
+        'val': (val_dataset, val_base_dataset),
+        'test': (test_dataset, test_base_dataset),
+    }
+    
+    for split_name, (scattering_dataset, base_dataset) in all_datasets.items():
+        print(f"\nProcessing {split_name} split...")
+        
+        scat_mom_list = []
+        prop = [[] for _ in range(base_dataset.num_classes)]
 
-    scat_mom_list = []
-    prop = [[] for _ in range(base_dataset.num_classes)]
+        atom_percentage = []
+        carbon = []
+        nitro = []
+        oxy = []
+        atom_percentage.append(carbon)
+        atom_percentage.append(nitro)
+        atom_percentage.append(oxy)
 
-    atom_percentage = []
-    carbon = []
-    nitro = []
-    oxy = []
-    atom_percentage.append(carbon)
-    atom_percentage.append(nitro)
-    atom_percentage.append(oxy)
+        for index, entry in enumerate(tqdm(scattering_dataset, desc=f"Processing {split_name}")):
+            scat_mom_list.append(entry[0].detach().cpu().numpy())
 
-    for index, entry in enumerate(tqdm(full_dataset)):
-        scat_mom_list.append(entry[0].detach().cpu().numpy())
+            # Save all properties
+            for i in range(len(entry[1])):
+                prop[i].append(entry[1][i].item() if torch.is_tensor(entry[1][i]) else entry[1][i])
 
-        # Save all properties
-        for i in range(len(entry[1])):
-            prop[i].append(entry[1][i].item() if torch.is_tensor(entry[1][i]) else entry[1][i])
+            data = base_dataset[index]
 
-        data = no_transform_dataset[index]
+            c = 0
+            n = 0
+            o = 0
+            atom_count = 0
+            for atom in data.element:
+                if atom == 'C':
+                    c += 1
+                if atom == 'N':
+                    n += 1
+                if atom == 'O':
+                    o += 1
+                atom_count += 1
 
-        c = 0
-        n = 0
-        o = 0
-        atom_count = 0
-        for atom in data.element:
-            if atom == 'C':
-                c += 1
-            if atom == 'N':
-                n += 1
-            if atom == 'O':
-                o += 1
-            atom_count += 1
+            c = c / atom_count if atom_count > 0 else 0
+            n = n / atom_count if atom_count > 0 else 0
+            o = o / atom_count if atom_count > 0 else 0
+            carbon.append(c)
+            nitro.append(n)
+            oxy.append(o)
 
-        c = c / atom_count if atom_count > 0 else 0
-        n = n / atom_count if atom_count > 0 else 0
-        o = o / atom_count if atom_count > 0 else 0
-        carbon.append(c)
-        nitro.append(n)
-        oxy.append(o)
+        scat_mom_list = np.array(scat_mom_list)
 
-    scat_mom_list = np.array(scat_mom_list)
+        moments = torch.Tensor(scat_mom_list)
+        with torch.no_grad():
+            ordered_embed = model.embed(moments)[0]
 
-    moments = torch.Tensor(scat_mom_list)
-    with torch.no_grad():
-        ordered_embed = model.embed(moments)[0]
-
-    print("Saving embeddings...")
-    np.save(os.path.join(save_dir, f"ordered_embedding_{prefix}.npy"), ordered_embed.cpu().detach().numpy())
-    np.save(os.path.join(save_dir, f"scattering_coeffs_{prefix}.npy"), scat_mom_list)
-    np.save(os.path.join(save_dir, f"embedding_prop_lists_{prefix}.npy"), prop)
-    np.save(os.path.join(save_dir, f"atom_percentages_{prefix}.npy"), atom_percentage)
+        print(f"Saving {split_name} embeddings...")
+        np.save(os.path.join(save_dir, f"ordered_embedding_{prefix}_{split_name}.npy"), ordered_embed.cpu().detach().numpy())
+        np.save(os.path.join(save_dir, f"scattering_coeffs_{prefix}_{split_name}.npy"), scat_mom_list)
+        np.save(os.path.join(save_dir, f"embedding_prop_lists_{prefix}_{split_name}.npy"), prop)
+        np.save(os.path.join(save_dir, f"atom_percentages_{prefix}_{split_name}.npy"), atom_percentage)
 
     print(f"\nTraining complete! Results saved to: {save_dir}")
 

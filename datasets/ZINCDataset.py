@@ -11,6 +11,7 @@ import torch_geometric.data
 
 from rdkit import Chem
 
+from datasets.property_utils import PROPERTIES_TO_COMPUTE
 def read_smiles_rdkit(smi):
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
@@ -19,17 +20,12 @@ def read_smiles_rdkit(smi):
 
 
 class ZINCDataset(Dataset):
-
     """ZINC Tranch data"""
 
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
         
 
-        self.prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', \
-                #  'BalabanJ', 'BertzCT', 'Ipc', \
-                 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', \
-                #  'SAscore', 'FSP3'\
-                ]
+        self.prop_list = PROPERTIES_TO_COMPUTE.copy()
         
         if include_ki:
             self.prop_list.append('Ki')

@@ -29,3 +29,4 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # Run generate_embeddings
 
 python grassy_dit/extract_scattering_fixed.py --dataset datasets/MOSES.npy --stats datasets/MOSES_stats.npy  --output grassy_dit/data/moses
+

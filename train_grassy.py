@@ -24,7 +24,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from models.GRASSY_model import GRASSY
-from datasets.load_ZINC_tranche import ZINCDataset, Scattering
+from datasets.ZINCDataset import ZINCDataset, Scattering
 
 
 def load_config(config_path: str) -> dict:

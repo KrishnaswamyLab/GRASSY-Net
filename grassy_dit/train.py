@@ -129,7 +129,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         """Compute num_atom_types from scattering dimension."""
         if y is not None:
             scattering_cfg = self.config.get('scattering', {})
-            num_levels = scattering_cfg.get('num_levels', 11)
+            J = scattering_cfg.get('J', 4)
+            num_levels = 1 + J + J*(J-1)//2 
             num_moments = scattering_cfg.get('num_moments', 4)
             
             if hasattr(y, 'shape'):
