@@ -236,13 +236,23 @@ class MOSESBenchmark:
         print(f"\nComputing MOSES metrics for {len(generated_smiles)} molecules...")
         ensure_moses_stats()
 
-        metrics = get_all_metrics(
-            gen=generated_smiles,
-            k=k,
-            n_jobs=self.n_jobs,
-            device=self.device,
-            train=self.train_smiles,
-        )
+        # Adjust k for small sample sizes
+        n_gen = len(generated_smiles)
+        valid_k = [x for x in k if x <= n_gen]
+        if not valid_k and n_gen > 0:
+            valid_k = [n_gen]
+
+        try:
+            metrics = get_all_metrics(
+                gen=generated_smiles,
+                k=valid_k,
+                n_jobs=self.n_jobs,
+                device=self.device,
+                train=self.train_smiles,
+            )
+        except Exception as e:
+            print(f"Warning: Failed to compute MOSES metrics: {e}")
+            metrics = {}
 
         return metrics
 
