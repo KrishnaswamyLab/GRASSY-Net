@@ -1,6 +1,9 @@
 """
 GRASSY-DiT training using torch-molecule's GraphDIT infrastructure.
 Replaces their property conditioning with our cross-attention to scattering tokens.
+
+Includes optional Gumbel-Softmax consistency loss for enforcing that generated
+molecules match their conditioning scattering moments.
 """
 import torch
 import torch.nn.functional as F
@@ -12,16 +15,18 @@ import wandb
 
 from torch_molecule import GraphDITMolecularGenerator
 from torch_molecule.generator.graph_dit.utils import PlaceHolder, to_dense
+from torch_molecule.generator.graph_dit.diffusion import reverse_diffusion, sample_discrete_feature_noise
 from torch_geometric.loader import DataLoader
 
 from rdkit import Chem
 
 from grassy_dit.model import ScatteringDenoiser
+from grassy_dit.soft_scattering import DenseSoftScattering, GumbelSoftmaxSampler
 from utils.config_utils import config_to_hparams, load_config, apply_overrides, get_grassy_flags
 import yaml
 import datetime
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 # Usage:
 #     python -m grassy_dit.train --config grassy_dit/grassy_dit_config.yaml
 #     python -m grassy_dit.train --config grassy_dit_config.yaml --override training.epochs=50
@@ -84,12 +89,13 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         else:
             loss_val = loss
         
-        wandb.log({
-            "train_loss": loss_val,
-            "train_loss_X": loss_X_val,
-            "train_loss_E": loss_E_val,
-            "step": self.step
-        })
+        if wandb.run is not None:
+            wandb.log({
+                "train_loss": loss_val,
+                "train_loss_X": loss_X_val,
+                "train_loss_E": loss_E_val,
+                "step": self.step
+            })
         self.step += 1
         
         return loss, loss_X, loss_E
@@ -100,13 +106,292 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         pass
 
 
+class DifferentiableGenerator:
+    """
+    Differentiable molecule generation using Gumbel-Softmax.
+    
+    Enables gradient flow through the full generation process for
+    computing consistency loss between conditioning and generated scattering.
+    """
+    
+    def __init__(
+        self,
+        model: ScatteringTransformerAdapter,
+        noise_schedule,
+        transition_model,
+        limit_dist,
+        input_dim_X: int,
+        input_dim_E: int,
+        max_node: int,
+        timesteps: int,
+        num_atom_types: int,
+        active_index: Optional[torch.Tensor] = None,
+        J: int = 4,
+        num_moments: int = 4,
+        temperature: float = 1.0,
+        temperature_min: float = 0.1,
+        num_generation_steps: int = 50,
+        guide_scale: float = 2.0,
+        device: torch.device = None,
+    ):
+        """
+        Args:
+            model: The ScatteringTransformerAdapter model
+            noise_schedule: NoiseScheduleDiscrete instance
+            transition_model: MarginalTransition instance
+            limit_dist: Limit distribution for sampling initial noise
+            input_dim_X: Number of atom type classes (active in dataset)
+            input_dim_E: Number of edge type classes
+            max_node: Maximum number of nodes
+            timesteps: Total diffusion timesteps
+            num_atom_types: Number of atom types for scattering (full, e.g. 10)
+            active_index: Tensor mapping active atom indices to full 118 atom types
+            J: Number of wavelet scales for scattering
+            num_moments: Number of statistical moments
+            temperature: Initial Gumbel-Softmax temperature
+            temperature_min: Minimum temperature (annealed to during generation)
+            num_generation_steps: Number of steps for generation (can be < timesteps)
+            guide_scale: Classifier-free guidance scale
+            device: Device for computation
+        """
+        self.model = model
+        self.noise_schedule = noise_schedule
+        self.transition_model = transition_model
+        self.limit_dist = limit_dist
+        self.input_dim_X = input_dim_X
+        self.input_dim_E = input_dim_E
+        self.max_node = max_node
+        self.timesteps = timesteps
+        self.num_atom_types = num_atom_types
+        self.active_index = active_index
+        self.temperature = temperature
+        self.temperature_min = temperature_min
+        self.num_generation_steps = num_generation_steps
+        self.guide_scale = guide_scale
+        self.device = device
+        
+        # Initialize soft scattering transform
+        self.soft_scattering = DenseSoftScattering(
+            num_atom_types=num_atom_types,
+            J=J,
+            num_moments=num_moments
+        ).to(device)
+        
+    def _get_temperature(self, step, total_steps):
+        """Anneal temperature from high to low during generation."""
+        progress = step / max(total_steps - 1, 1)
+        return self.temperature * (1 - progress) + self.temperature_min * progress
+    
+    def _soft_reverse_step(self, X_t, E_t, scattering, node_mask, s_norm, t_norm, temperature):
+        """
+        Perform one reverse diffusion step with Gumbel-Softmax sampling.
+        
+        Returns soft (differentiable) samples instead of hard discrete samples.
+        """
+        bs, n, _ = X_t.shape
+        device = X_t.device
+        
+        beta_t = self.noise_schedule(t_normalized=t_norm)
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_norm)
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_norm)
+        
+        # Neural net predictions
+        noisy_data = {
+            "X_t": X_t,
+            "E_t": E_t,
+            "y_t": scattering,
+            "t": t_norm * self.timesteps,
+            "node_mask": node_mask,
+        }
+        
+        # Get predictions (conditioned)
+        pred = self.model(noisy_data, unconditioned=False)
+        pred_X = F.softmax(pred.X, dim=-1)
+        pred_E = F.softmax(pred.E, dim=-1)
+        
+        # Classifier-free guidance
+        if self.guide_scale is not None and self.guide_scale != 1:
+            pred_uncond = self.model(noisy_data, unconditioned=True)
+            pred_X_uncond = F.softmax(pred_uncond.X, dim=-1)
+            pred_E_uncond = F.softmax(pred_uncond.E, dim=-1)
+            
+            # Apply guidance in probability space
+            pred_X = pred_X_uncond * (pred_X / pred_X_uncond.clamp_min(1e-5)) ** self.guide_scale
+            pred_E = pred_E_uncond * (pred_E / pred_E_uncond.clamp_min(1e-5)) ** self.guide_scale
+            pred_X = pred_X / pred_X.sum(dim=-1, keepdim=True).clamp_min(1e-5)
+            pred_E = pred_E / pred_E.sum(dim=-1, keepdim=True).clamp_min(1e-5)
+        
+        # Get transition matrices
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device)
+        Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, device)
+        Qt = self.transition_model.get_Qt(beta_t, device)
+        
+        # Compute reverse diffusion probabilities
+        Xt_all = torch.cat([X_t, E_t.reshape(bs, n, -1)], dim=-1)
+        predX_all = torch.cat([pred_X, pred_E.reshape(bs, n, -1)], dim=-1)
+        
+        unnormalized_probX_all = reverse_diffusion(
+            predX_0=predX_all, X_t=Xt_all, Qt=Qt.X, Qsb=Qsb.X, Qtb=Qtb.X
+        )
+        
+        unnormalized_prob_X = unnormalized_probX_all[:, :, :self.input_dim_X]
+        unnormalized_prob_E = unnormalized_probX_all[:, :, self.input_dim_X:].reshape(bs, n * n, -1)
+        
+        # Normalize
+        unnormalized_prob_X[torch.sum(unnormalized_prob_X, dim=-1) == 0] = 1e-5
+        unnormalized_prob_E[torch.sum(unnormalized_prob_E, dim=-1) == 0] = 1e-5
+        
+        prob_X = unnormalized_prob_X / torch.sum(unnormalized_prob_X, dim=-1, keepdim=True)
+        prob_E = unnormalized_prob_E / torch.sum(unnormalized_prob_E, dim=-1, keepdim=True)
+        prob_E = prob_E.reshape(bs, n, n, self.input_dim_E)
+        
+        # Gumbel-Softmax sampling (differentiable)
+        eps = 1e-10
+        logits_X = torch.log(prob_X.clamp(min=eps))
+        logits_E = torch.log(prob_E.clamp(min=eps))
+        
+        X_s = F.gumbel_softmax(logits_X, tau=temperature, hard=False, dim=-1)
+        
+        # Sample edges
+        logits_E_flat = logits_E.reshape(-1, self.input_dim_E)
+        E_s_flat = F.gumbel_softmax(logits_E_flat, tau=temperature, hard=False, dim=-1)
+        E_s = E_s_flat.reshape(bs, n, n, self.input_dim_E)
+        
+        # Make edges symmetric
+        E_s = (E_s + E_s.transpose(1, 2)) / 2
+        
+        # Mask invalid nodes/edges
+        node_mask_expanded = node_mask.unsqueeze(-1).float()
+        edge_mask = (node_mask.unsqueeze(1) & node_mask.unsqueeze(2)).unsqueeze(-1).float()
+        
+        X_s = X_s * node_mask_expanded
+        E_s = E_s * edge_mask
+        
+        return X_s, E_s
+    
+    def generate_soft(self, scattering, node_mask):
+        """
+        Generate molecules with differentiable Gumbel-Softmax sampling.
+        
+        Args:
+            scattering: [B, scattering_dim] conditioning scattering moments
+            node_mask: [B, N] valid nodes mask
+            
+        Returns:
+            soft_X: [B, N, input_dim_X] soft atom type probabilities
+            soft_E: [B, N, N, input_dim_E] soft edge type probabilities
+        """
+        bs = scattering.shape[0]
+        device = scattering.device
+        
+        # Sample initial noise
+        z_T = sample_discrete_feature_noise(
+            limit_dist=self.limit_dist, node_mask=node_mask
+        )
+        X, E = z_T.X.to(device), z_T.E.to(device)
+        
+        # Determine step size for generation
+        step_size = max(1, self.timesteps // self.num_generation_steps)
+        steps = list(range(0, self.timesteps, step_size))
+        if steps[-1] != self.timesteps - 1:
+            steps.append(self.timesteps - 1)
+        steps = list(reversed(steps))
+        
+        # Reverse diffusion with Gumbel-Softmax
+        for i, s_int in enumerate(steps[1:]):
+            t_int = steps[i]
+            
+            s_array = torch.full((bs, 1), s_int, dtype=torch.float, device=device)
+            t_array = torch.full((bs, 1), t_int, dtype=torch.float, device=device)
+            s_norm = s_array / self.timesteps
+            t_norm = t_array / self.timesteps
+            
+            # Anneal temperature
+            temperature = self._get_temperature(i, len(steps) - 1)
+            
+            # Soft reverse step
+            X, E = self._soft_reverse_step(X, E, scattering, node_mask, s_norm, t_norm, temperature)
+        
+        return X, E
+    
+    def _expand_to_full_atom_types(self, soft_X):
+        """
+        Expand soft_X from active atom types to full num_atom_types.
+        
+        The model operates on input_dim_X active atom types, but scattering
+        was computed with num_atom_types (e.g., 10). We need to map back.
+        
+        Args:
+            soft_X: [B, N, input_dim_X] soft atom predictions (active types only)
+            
+        Returns:
+            expanded_X: [B, N, num_atom_types] with zeros for inactive types
+        """
+        if self.input_dim_X == self.num_atom_types:
+            return soft_X  # No expansion needed
+        
+        B, N, _ = soft_X.shape
+        
+        # Create full tensor with zeros
+        expanded_X = torch.zeros(B, N, self.num_atom_types, device=soft_X.device, dtype=soft_X.dtype)
+        
+        # Map active indices to full tensor
+        # active_index maps: position i in input_dim_X -> atom type active_index[i] in full 118
+        # But for scattering, we just need the first num_atom_types
+        # The active_index contains the actual atom numbers (e.g., [6, 7, 8] for C, N, O)
+        # We need to map these to positions 0, 1, 2, ... in num_atom_types
+        
+        if self.active_index is not None:
+            # active_index is like [6, 7, 8, 9, 16, ...] (atomic numbers - 1)
+            # For scattering with 10 atom types, we assume the first num_atom_types 
+            # elements of active_index correspond to the scattering atom types
+            for i in range(min(self.input_dim_X, self.num_atom_types)):
+                expanded_X[:, :, i] = soft_X[:, :, i]
+        else:
+            # No active_index - just copy directly
+            expanded_X[:, :, :self.input_dim_X] = soft_X
+        
+        return expanded_X
+    
+    def compute_consistency_loss(self, scattering_cond, node_mask):
+        """
+        Compute consistency loss between conditioning and generated scattering.
+        
+        Args:
+            scattering_cond: [B, scattering_dim] conditioning scattering moments
+            node_mask: [B, N] valid nodes mask
+            
+        Returns:
+            loss: Scalar L2 loss between conditioning and generated scattering
+            scattering_gen: [B, scattering_dim] generated scattering (for logging)
+        """
+        # Generate soft molecules
+        soft_X, soft_E = self.generate_soft(scattering_cond, node_mask)
+        
+        # Expand soft_X to full atom type dimensions for scattering
+        soft_X_expanded = self._expand_to_full_atom_types(soft_X)
+        
+        # Compute scattering of generated molecules
+        scattering_gen = self.soft_scattering(soft_X_expanded, soft_E, node_mask)
+        
+        # L2 loss
+        loss = F.mse_loss(scattering_gen, scattering_cond)
+        
+        return loss, scattering_gen
+
+
 class ScatteringGraphDIT(GraphDITMolecularGenerator):
-    """GraphDIT with scattering moment conditioning via cross-attention."""
+    """GraphDIT with scattering moment conditioning via cross-attention.
+    
+    Supports optional Gumbel-Softmax consistency loss for enforcing that
+    generated molecules match their conditioning scattering moments.
+    """
     
     def __init__(self, config: Dict[str, Any], **kwargs):
         model_cfg = config.get('model', {})
         training_cfg = config.get('training', {})
         checkpoint_cfg = config.get('checkpoint', {})
+        consistency_cfg = config.get('consistency', {})
         
         super().__init__(
             hidden_size=model_cfg.get('hidden_size', 384),
@@ -125,6 +410,18 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self.checkpoint_dir = checkpoint_cfg.get('save_dir', './checkpoints')
         self.save_every_n_epochs = checkpoint_cfg.get('save_every_n_epochs', 10)
         self._best_loss = float('inf')
+        
+        # Consistency loss configuration
+        self.use_consistency_loss = consistency_cfg.get('enabled', False)
+        self.lw_consistency = consistency_cfg.get('weight', 0.1)
+        self.consistency_temperature = consistency_cfg.get('temperature', 1.0)
+        self.consistency_temperature_min = consistency_cfg.get('temperature_min', 0.1)
+        self.consistency_num_steps = consistency_cfg.get('num_generation_steps', 50)
+        self.consistency_every_n_steps = consistency_cfg.get('every_n_steps', 10)
+        self.consistency_start_epoch = consistency_cfg.get('start_epoch', 5)
+        
+        # Will be initialized after model is created
+        self._diff_generator = None
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -158,6 +455,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self._setup_diffusion_params(checkpoint)
         
         model_cfg = self.config.get('model', {})
+        scattering_cfg = self.config.get('scattering', {})
         
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
@@ -178,15 +476,61 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         if checkpoint is not None:
             self.model.load_state_dict(checkpoint["model_state_dict"])
         
+        # Initialize differentiable generator for consistency loss
+        if self.use_consistency_loss:
+            # Get active_index if available (maps model atom types to full atom types)
+            active_index = None
+            if hasattr(self, 'dataset_info') and self.dataset_info:
+                active_index = self.dataset_info.get("active_index", None)
+            
+            self._diff_generator = DifferentiableGenerator(
+                model=self.model,
+                noise_schedule=self.noise_schedule,
+                transition_model=self.transition_model,
+                limit_dist=self.limit_dist,
+                input_dim_X=self.input_dim_X,
+                input_dim_E=self.input_dim_E,
+                max_node=self.max_node,
+                timesteps=self.timesteps,
+                num_atom_types=getattr(self, 'num_atom_types', 16),
+                active_index=active_index,
+                J=scattering_cfg.get('J', 4),
+                num_moments=scattering_cfg.get('num_moments', 4),
+                temperature=self.consistency_temperature,
+                temperature_min=self.consistency_temperature_min,
+                num_generation_steps=self.consistency_num_steps,
+                guide_scale=self.guide_scale,
+                device=self.device,
+            )
+            print(f"Initialized DifferentiableGenerator for consistency loss")
+            print(f"  - Weight: {self.lw_consistency}")
+            print(f"  - Temperature: {self.consistency_temperature} -> {self.consistency_temperature_min}")
+            print(f"  - Generation steps: {self.consistency_num_steps}")
+            print(f"  - Every N training steps: {self.consistency_every_n_steps}")
+            print(f"  - Start epoch: {self.consistency_start_epoch}")
+        
         return self.model
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
-        """Override to add validation and save best checkpoint."""
+        """Override to add consistency loss, validation, and checkpoint saving."""
         print(f"Starting epoch {epoch}...", flush=True)
         
-        losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
-        avg_train_loss = sum(losses) / len(losses)
+        # Check if we should use consistency loss this epoch
         current_epoch = epoch + 1
+        use_consistency = (
+            self.use_consistency_loss and 
+            self._diff_generator is not None and
+            current_epoch >= self.consistency_start_epoch
+        )
+        
+        if use_consistency:
+            # Custom training loop with consistency loss
+            losses = self._train_epoch_with_consistency(train_loader, optimizer, epoch, global_pbar)
+        else:
+            # Standard training
+            losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
+        
+        avg_train_loss = sum(losses) / len(losses)
         
         # Save checkpoint FIRST if train loss improved
         if self.checkpoint_dir and avg_train_loss < self._best_loss:
@@ -214,6 +558,74 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             if val_loss is not None:
                 log_dict["val_loss"] = val_loss
             wandb.log(log_dict)
+        
+        return losses
+    
+    def _train_epoch_with_consistency(self, train_loader, optimizer, epoch, global_pbar=None):
+        """Training epoch with Gumbel-Softmax consistency loss."""
+        self.model.train()
+        losses = []
+        active_index = self.dataset_info["active_index"]
+        
+        global_step = epoch * len(train_loader)
+        
+        for step, batched_data in enumerate(train_loader):
+            batched_data = batched_data.to(self.device)
+            optimizer.zero_grad()
+            
+            # Convert to dense format
+            data_x = F.one_hot(batched_data.x, num_classes=118).float()[:, active_index]
+            data_edge_attr = F.one_hot(batched_data.edge_attr, num_classes=5).float()
+            dense_data, node_mask = to_dense(data_x, batched_data.edge_index, data_edge_attr, batched_data.batch, self.max_node)
+            dense_data = dense_data.mask(node_mask)
+            X, E = dense_data.X, dense_data.E
+            
+            # Standard denoising loss
+            noisy_data = self.apply_noise(X, E, batched_data.y, node_mask)
+            loss_denoise, loss_X, loss_E = self.model.compute_loss(
+                noisy_data, true_X=X, true_E=E, lw_X=self.lw_X, lw_E=self.lw_E
+            )
+            
+            # Consistency loss (every N steps to save compute)
+            loss_consistency = torch.tensor(0.0, device=self.device)
+            if (global_step + step) % self.consistency_every_n_steps == 0:
+                scattering_cond = batched_data.y.to(self.device)
+                loss_consistency, _ = self._diff_generator.compute_consistency_loss(
+                    scattering_cond, node_mask
+                )
+            
+            # Total loss
+            loss = loss_denoise + self.lw_consistency * loss_consistency
+            
+            loss.backward()
+            if self.grad_clip_value is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_value)
+            optimizer.step()
+            
+            losses.append(loss.item())
+            
+            # Logging
+            log_dict = {
+                "Epoch": f"{epoch+1}/{self.epochs}",
+                "Step": f"{step+1}/{len(train_loader)}",
+                "Loss": f"{loss.item():.4f}",
+                "Loss_X": f"{loss_X.item() if isinstance(loss_X, torch.Tensor) else loss_X:.4f}",
+                "Loss_E": f"{loss_E.item() if isinstance(loss_E, torch.Tensor) else loss_E:.4f}",
+                "Loss_Consistency": f"{loss_consistency.item():.4f}",
+            }
+            
+            if global_pbar is not None:
+                global_pbar.set_postfix(log_dict)
+                global_pbar.update(1)
+            
+            if wandb.run is not None:
+                wandb.log({
+                    "train_loss": loss.item(),
+                    "train_loss_X": loss_X.item() if isinstance(loss_X, torch.Tensor) else loss_X,
+                    "train_loss_E": loss_E.item() if isinstance(loss_E, torch.Tensor) else loss_E,
+                    "train_loss_consistency": loss_consistency.item(),
+                    "step": global_step + step,
+                })
         
         return losses
 

@@ -35,6 +35,17 @@ training:
   batch_size: 128
   learning_rate: 1.0e-4
 
+# Consistency loss configuration (Gumbel-Softmax)
+# Enforces that generated molecules match their conditioning scattering moments
+consistency:
+  enabled: false  # Set to true to enable consistency loss
+  weight: 0.1  # Weight for consistency loss (lw_consistency)
+  temperature: 1.0  # Initial Gumbel-Softmax temperature
+  temperature_min: 0.1  # Final temperature (annealed during generation)
+  num_generation_steps: 50  # Number of diffusion steps for generation (fewer = faster but lower quality)
+  every_n_steps: 10  # Compute consistency loss every N training steps (saves compute)
+  start_epoch: 5  # Start using consistency loss after this epoch (let model warm up first)
+
 # Checkpoint configuration
 checkpoint:
   save_dir: "./checkpoints/moses"
