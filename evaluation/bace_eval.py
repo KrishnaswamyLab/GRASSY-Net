@@ -31,10 +31,11 @@ from grassy_dit.sample import build_dummy_scattering, load_model_from_checkpoint
 RESULTS_DIR = Path(__file__).parent / "results"
 
 # Baseline values from Graph DiT paper Table 2
+# Note: We report only the main validity metric (after LCC post-processing)
+# which corresponds to the number OUTSIDE brackets in the paper.
 BACE_BASELINES = {
     "Graph DiT": {
         "validity": 0.8674,
-        "validity_filtered": 0.8495,
         "coverage": "8/8",
         "diversity": 0.8238,
         "similarity": 0.8752,
@@ -42,7 +43,6 @@ BACE_BASELINES = {
     },
     "DiGress": {
         "validity": 0.3511,
-        "validity_filtered": 0.2858,
         "coverage": "8/8",
         "diversity": 0.8862,
         "similarity": 0.6942,
@@ -50,7 +50,6 @@ BACE_BASELINES = {
     },
     "MOOD": {
         "validity": 0.9947,
-        "validity_filtered": 0.4502,
         "coverage": "8/8",
         "diversity": 0.8902,
         "similarity": 0.2587,
@@ -468,16 +467,14 @@ class BACEBenchmark:
         rows = [header, separator]
 
         for model_name, baseline in BACE_BASELINES.items():
-            validity_str = f"{baseline['validity']:.4f} ({baseline['validity_filtered']:.4f})"
             row = (
-                f"| {model_name} | {validity_str} | {baseline['coverage']} | "
+                f"| {model_name} | {baseline['validity']:.4f} | {baseline['coverage']} | "
                 f"{baseline['diversity']:.4f} | {baseline['similarity']:.4f} | {baseline['fcd']:.4f} |"
             )
             rows.append(row)
 
-        validity_str = f"{metrics['validity']:.4f} ({metrics['validity_filtered']:.4f})"
         row = (
-            f"| GRASSY-DiT | {validity_str} | {metrics['coverage']} | "
+            f"| GRASSY-DiT | {metrics['validity']:.4f} | {metrics['coverage']} | "
             f"{metrics['diversity']:.4f} | {metrics['similarity']:.4f} | {metrics['fcd']:.4f} |"
         )
         rows.append(row)
@@ -556,7 +553,7 @@ class BACEBenchmark:
         print(f"\nGenerated: {len(generated_smiles)} molecules")
         print(f"Valid: {metrics['n_valid']} ({metrics['validity']:.2%})")
         print("\nMetrics:")
-        print(f"  Validity: {metrics['validity']:.4f} ({metrics['validity_filtered']:.4f} filtered)")
+        print(f"  Validity: {metrics['validity']:.4f}")
         print(f"  Coverage: {metrics['coverage']}")
         print(f"  Diversity: {metrics['diversity']:.4f}")
         print(f"  Similarity: {metrics['similarity']:.4f}")
