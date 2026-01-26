@@ -152,7 +152,6 @@ def main():
         prop_stat_dict=stats_path,
         transform=None
     )
-    
     print(f"\nLoaded datasets:")
     print(f"  - Train: {len(train_base_dataset)} molecules")
     print(f"  - Val: {len(val_base_dataset)} molecules")
@@ -160,7 +159,6 @@ def main():
     print(f"  - Total: {len(train_base_dataset) + len(val_base_dataset) + len(test_base_dataset)} molecules")
     print(f"Node features: {train_base_dataset.num_node_features}")
     print(f"Properties: {train_base_dataset.num_classes}")
-
     # Create fixed scattering transform
     print(f"\nScattering configuration:")
     print(f"  - Wavelet scales (J): {scattering_cfg['J']}")

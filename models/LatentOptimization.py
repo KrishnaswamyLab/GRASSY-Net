@@ -18,11 +18,10 @@ class LatentOptimizer:
         # Enable gradients
         z = z.clone().detach().requires_grad_(True)
         
-        # Predict property
-        property_pred = self.model.predict(z)  # [batch_size, num_properties]
+        # Predict all properties (regression)
+        y_full, y_pred, num_atoms_pred = self.model.predict(z)
         
-        # Get the target property for this batch
-        target_property = property_pred[:, self.property_idx]
+        target_property = y_full[:, self.property_idx]
         
         loss = -target_property.mean()
         loss.backward(retain_graph=True)
@@ -44,10 +43,19 @@ class LatentOptimizer:
             n_steps: Number of optimization steps
             
         Returns:
-            The path of latent points and decoded outputs (scattering moments of the path)
+            The path of latent points, decoded outputs (scattering moments of the path), and num_atoms
         """
         latent_trajectory = [z.detach().clone()]
-        decoded_trajectory = [self.model.decode(z).detach().clone()] if return_decoded else None
+        decoded_trajectory = None
+        num_atoms_trajectory = None
+        
+        if return_decoded:
+            with torch.no_grad():
+                decoded = self.model.decode(z)
+                decoded_trajectory = [decoded.detach().clone()]
+                y_full, _, _ = self.model.predict(z)
+                num_atoms = y_full[:, -1]  # Last property is num_atoms
+                num_atoms_trajectory = [torch.round(num_atoms).detach().clone()]
         
         z_current = z.detach().clone()
         
@@ -58,9 +66,12 @@ class LatentOptimizer:
             if return_decoded:
                 with torch.no_grad():
                     decoded = self.model.decode(z_current)
-                decoded_trajectory.append(decoded.detach().clone())
+                    decoded_trajectory.append(decoded.detach().clone())
+                    y_full, _, _ = self.model.predict(z_current)
+                    num_atoms = y_full[:, -1]  # Last property is num_atoms
+                    num_atoms_trajectory.append(torch.round(num_atoms).detach().clone())
         
-        return latent_trajectory, decoded_trajectory
+        return latent_trajectory, decoded_trajectory, num_atoms_trajectory
     
     def optimize_batch(self, z_batch, n_steps, return_decoded = True):
         z_current = z_batch.detach().clone()
@@ -94,8 +105,8 @@ class MultiPropertyOptimizer:
         """
         z = z.clone().detach().requires_grad_(True)
         
-        # Predict all properties
-        property_pred = self.model.predict(z)  # [batch_size, num_properties]
+        # Predict all properties (regression)
+        property_pred, _, _ = self.model.predict(z)
         
         # Compute weighted loss
         loss = torch.zeros(1, device=z.device)
@@ -123,10 +134,20 @@ class MultiPropertyOptimizer:
             n_steps: Number of optimization steps
             
         Returns:
-            The path of latent points and decoded outputs (scattering moments of the path)
+            The path of latent points, decoded outputs (scattering moments of the path), and num_atoms
         """
         latent_trajectory = [z.detach().clone()]
-        decoded_trajectory = [self.model.decode(z).detach().clone()] if return_decoded else None
+        decoded_trajectory = None
+        num_atoms_trajectory = None
+        
+        if return_decoded:
+            with torch.no_grad():
+                decoded = self.model.decode(z)
+                decoded_trajectory = [decoded.detach().clone()]
+                # Get num_atoms from predictions
+                y_full, _, _ = self.model.predict(z)
+                num_atoms = y_full[:, -1]  # Last property is num_atoms
+                num_atoms_trajectory = [torch.round(num_atoms).detach().clone()]
         
         z_current = z.detach().clone()
         
@@ -137,9 +158,12 @@ class MultiPropertyOptimizer:
             if return_decoded:
                 with torch.no_grad():
                     decoded = self.model.decode(z_current)
-                decoded_trajectory.append(decoded.detach().clone())
+                    decoded_trajectory.append(decoded.detach().clone())
+                    y_full, _, _ = self.model.predict(z_current)
+                    num_atoms = y_full[:, -1]  # Last property is num_atoms
+                    num_atoms_trajectory.append(torch.round(num_atoms).detach().clone())
         
-        return latent_trajectory, decoded_trajectory
+        return latent_trajectory, decoded_trajectory, num_atoms_trajectory
 
 
 class ConstrainedLatentOptimizer:
@@ -155,7 +179,7 @@ class ConstrainedLatentOptimizer:
     def _constrained_step(self, z):
         z = z.clone().detach().requires_grad_(True)
         
-        property_pred = self.model.predict(z)  # [batch_size, num_properties]
+        property_pred, _, _ = self.model.predict(z)
         
         # Main objective: maximize target property
         loss = -property_pred[:, self.optimize_idx].mean()
@@ -188,10 +212,20 @@ class ConstrainedLatentOptimizer:
             n_steps: Number of optimization steps
             
         Returns:
-            The path of latent points and decoded outputs (scattering moments of the path)
+            The path of latent points, decoded outputs (scattering moments of the path), and num_atoms
         """
         latent_trajectory = [z.detach().clone()]
-        decoded_trajectory = [self.model.decode(z).detach().clone()] if return_decoded else None
+        decoded_trajectory = None
+        num_atoms_trajectory = None
+        
+        if return_decoded:
+            with torch.no_grad():
+                decoded = self.model.decode(z)
+                decoded_trajectory = [decoded.detach().clone()]
+                # Get num_atoms from predictions
+                y_full, _, _ = self.model.predict(z)
+                num_atoms = y_full[:, -1]  # Last property is num_atoms
+                num_atoms_trajectory = [torch.round(num_atoms).detach().clone()]
         
         z_current = z.detach().clone()
         
@@ -202,6 +236,9 @@ class ConstrainedLatentOptimizer:
             if return_decoded:
                 with torch.no_grad():
                     decoded = self.model.decode(z_current)
-                decoded_trajectory.append(decoded.detach().clone())
+                    decoded_trajectory.append(decoded.detach().clone())
+                    y_full, _, _ = self.model.predict(z_current)
+                    num_atoms = y_full[:, -1]  # Last property is num_atoms
+                    num_atoms_trajectory.append(torch.round(num_atoms).detach().clone())
         
-        return latent_trajectory, decoded_trajectory
+        return latent_trajectory, decoded_trajectory, num_atoms_trajectory

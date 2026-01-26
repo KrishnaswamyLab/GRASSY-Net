@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #SBATCH --job-name=grassy_fixed_scattering
-#SBATCH --time=10:00:00
+#SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=gpu_h200
+#SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --mem=128G
 #SBATCH --output=./logs/slurm/%x_%j.out

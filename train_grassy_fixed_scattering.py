@@ -32,6 +32,39 @@ from datasets.ZINCDataset import ZINCDataset
 
 from utils.config_utils import load_config, apply_overrides, config_to_hparams, get_grassy_flags
 
+class PrecomputedScatteringDataset(torch.utils.data.Dataset):
+    """Load precomputed scattering coefficients from extract_scattering_fixed.py"""
+    
+    def __init__(self, scattering_path, base_dataset):
+        """
+        Args:
+            scattering_path: Path to scattering_moments.npy
+            base_dataset: Original ZINCDataset (for properties)
+        """
+        self.coefficients = torch.from_numpy(np.load(scattering_path)).float()
+        
+        # Extract properties from base dataset
+        self.properties = []
+        for i in range(len(base_dataset)):
+            y = base_dataset[i].y
+            y = y.squeeze(0).float()  # [1, 5] -> [5]
+            self.properties.append(y)
+        
+        assert len(self.coefficients) == len(self.properties), \
+            f"Mismatch: {len(self.coefficients)} coefficients vs {len(self.properties)} molecules"
+        
+        print(f"Loaded {len(self.coefficients)} precomputed scattering coefficients")
+        print(f"First coefficient shape: {self.coefficients[0].shape}")
+        print(f"First property shape: {self.properties[0].shape}")
+        print(f"First property: {self.properties[0]}")
+        print(f"Scattering dimension: {self.coefficients.shape[1]}")
+    
+    def __len__(self):
+        return len(self.coefficients)
+    
+    def __getitem__(self, idx):
+        return self.coefficients[idx], self.properties[idx]
+    
 class FixedScatteringTransform:
     """
     Transform that applies fixed GraphScatteringTransform to PyG Data objects.
@@ -90,7 +123,6 @@ def main():
     parser.add_argument('--override', type=str, nargs='*', default=[],
                         help='Override config values (e.g., training.n_epochs=50)')
     args = parser.parse_args()
-
     # Load and process config
     print(f"Loading config from: {args.config}")
     config = load_config(args.config)
@@ -140,17 +172,26 @@ def main():
     print(f"  - Wavelet scales (J): {scattering_cfg['J']}")
     print(f"  - Moments: {scattering_cfg['num_moments']}")
 
-    scattering_transform = FixedScatteringTransform(
-        in_channels=base_dataset.num_node_features,
-        J=scattering_cfg['J'],
-        num_moments=scattering_cfg['num_moments'],
-    )
-    scattering_dim = scattering_transform.out_shape()
-    print(f"  - Output dimension: {scattering_dim}")
+    # scattering_transform = FixedScatteringTransform(
+    #     in_channels=base_dataset.num_node_features,
+    #     J=scattering_cfg['J'],
+    #     num_moments=scattering_cfg['num_moments'],
+    # )
+    # scattering_dim = scattering_transform.out_shape()
+    # print(f"  - Output dimension: {scattering_dim}")
 
     # Pre-compute scattering coefficients
-    print("\nPre-computing scattering coefficients...")
-    full_dataset = ScatteringDataset(base_dataset, scattering_transform, show_progress=True)
+    # Load precomputed scattering coefficients
+    print(f"\nLoading precomputed scattering coefficients...")
+    print(f"  - Path: {scattering_cfg['precomputed_path']}")
+    print(f"  - Original J: {scattering_cfg['J']}")
+    print(f"  - Original moments: {scattering_cfg['num_moments']}")
+
+    full_dataset = PrecomputedScatteringDataset(
+        scattering_path=scattering_cfg['precomputed_path'],
+        base_dataset=base_dataset,
+    )
+
 
     # Data splits
     train_size = dataset_cfg['train_size']

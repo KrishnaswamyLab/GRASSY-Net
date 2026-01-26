@@ -27,32 +27,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors, QED
 from torch_geometric.datasets import MoleculeNet
-
-from datasets.property_utils import compute_sas, compute_scs, PROPERTIES_TO_COMPUTE, PROPERTY_REGISTRY
+from property_utils import PROPERTIES_TO_COMPUTE, compute_props
 # At the top of your file, define a registry of available properties
-
-def compute_props(mol, bace_label=None):
-    """Compute properties for a molecule based on PROPERTIES_TO_COMPUTE list."""
-    out = {}
-    
-    for prop_name in PROPERTIES_TO_COMPUTE:
-        if prop_name not in PROPERTY_REGISTRY:
-            print(f"Warning: Unknown property '{prop_name}'")
-            continue
-        compute_fn, _ = PROPERTY_REGISTRY[prop_name]
-        try:
-            out[prop_name] = float(compute_fn(mol))
-        except Exception:
-            out[prop_name] = float('nan')
-    
-    # Special case: BACE activity label (always include if provided)
-    if bace_label is not None:
-        out['bace_activity'] = float(bace_label)
-    
-    return out
-
 
 def main():
     parser = argparse.ArgumentParser(description='Prepare BACE dataset for GRASSY-DiT')

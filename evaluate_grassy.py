@@ -39,6 +39,37 @@ from datasets.ZINCDataset import ZINCDataset
 
 from utils.config_utils import load_config, apply_overrides, config_to_hparams, get_grassy_flags
 
+class PrecomputedScatteringDataset(torch.utils.data.Dataset):
+    """Load precomputed scattering coefficients."""
+    
+    def __init__(self, scattering_path, base_dataset):
+        """
+        Args:
+            scattering_path: Path to scattering_moments.npy
+            base_dataset: Original ZINCDataset (for properties)
+        """
+        self.coefficients = torch.from_numpy(np.load(scattering_path)).float()
+        
+        # Extract properties from base dataset
+        self.properties = []
+        for i in range(len(base_dataset)):
+            y = base_dataset[i].y
+            y = y.squeeze(0).float()  # [1, n_props] -> [n_props]
+            self.properties.append(y)
+        
+        assert len(self.coefficients) == len(self.properties), \
+            f"Mismatch: {len(self.coefficients)} coefficients vs {len(self.properties)} molecules"
+        
+        print(f"Loaded {len(self.coefficients)} precomputed scattering coefficients")
+        print(f"Scattering dimension: {self.coefficients.shape[1]}")
+    
+    def __len__(self):
+        return len(self.coefficients)
+    
+    def __getitem__(self, idx):
+        return self.coefficients[idx], self.properties[idx]
+
+
 class FixedScatteringTransform:
     """
     Transform that applies fixed GraphScatteringTransform to PyG Data objects.
@@ -381,58 +412,148 @@ def main():
     datasets = {}
     base_datasets = {}
     
-    for split in splits_to_eval:
-        if split == 'test' and args.test_path:
-            path = args.test_path
-        else:
-            path = dataset_cfg.get(f'{split}_path')
+    # Check if using single file format (like MOSES) or split files format (like BACE)
+    dataset_name = dataset_cfg.get('name', 'UNKNOWN').lower()
+    use_single_file_format = 'path' in dataset_cfg and 'train_path' not in dataset_cfg
+    
+    if use_single_file_format:
+        # Single file format with train_size and val_size (MOSES-like)
+        print(f"\nDetected single-file dataset format")
+        dataset_path = dataset_cfg.get('path')
+        train_size = dataset_cfg.get('train_size')
+        val_size = dataset_cfg.get('val_size')
         
-        if path is None:
-            print(f"Warning: No path found for {split} split, skipping...")
-            continue
-            
-        print(f"\nLoading {split} dataset: {path}")
-        base_datasets[split] = ZINCDataset(
-            path,
+        if not dataset_path:
+            raise ValueError("Dataset config missing 'path' for single-file format")
+        
+        print(f"Loading dataset: {dataset_path}")
+        full_dataset = ZINCDataset(
+            dataset_path,
             prop_stat_dict=stats_path,
             transform=None
         )
-        print(f"  Loaded {len(base_datasets[split])} molecules")
+        total_size = len(full_dataset)
+        print(f"  Total: {total_size} molecules")
+        
+        # Calculate splits
+        test_size = total_size - train_size - val_size
+        
+        # Create split indices
+        train_start, train_end = 0, train_size
+        val_start, val_end = train_size, train_size + val_size
+        test_start, test_end = train_size + val_size, total_size
+        
+        split_ranges = {
+            'train': (train_start, train_end),
+            'val': (val_start, val_end),
+            'test': (test_start, test_end),
+        }
+        
+        for split in splits_to_eval:
+            if split in split_ranges:
+                start, end = split_ranges[split]
+                indices = list(range(start, end))
+                base_datasets[split] = torch.utils.data.Subset(full_dataset, indices)
+                print(f"  {split}: {len(base_datasets[split])} molecules")
+    else:
+        # Multi-file format with separate paths (BACE-like)
+        print(f"\nDetected multi-file dataset format")
+        for split in splits_to_eval:
+            if split == 'test' and args.test_path:
+                path = args.test_path
+            else:
+                path = dataset_cfg.get(f'{split}_path')
+            
+            if path is None:
+                print(f"Warning: No path found for {split} split, skipping...")
+                continue
+                
+            print(f"\nLoading {split} dataset: {path}")
+            base_datasets[split] = ZINCDataset(
+                path,
+                prop_stat_dict=stats_path,
+                transform=None
+            )
+            print(f"  Loaded {len(base_datasets[split])} molecules")
 
     if not base_datasets:
         raise ValueError("No datasets loaded! Check your config paths.")
 
     # Get dataset info from first loaded dataset
     first_dataset = next(iter(base_datasets.values()))
-    num_node_features = first_dataset.num_node_features
-    num_properties = first_dataset.num_classes
+    if isinstance(first_dataset, torch.utils.data.Subset):
+        # For Subset, get the underlying dataset
+        actual_dataset = first_dataset.dataset
+    else:
+        actual_dataset = first_dataset
+    
+    num_node_features = actual_dataset.num_node_features
+    num_properties = actual_dataset.num_classes
     
     print(f"\nDataset info:")
     print(f"  Node features: {num_node_features}")
     print(f"  Properties: {num_properties}")
 
-    # Create scattering transform
+    # Check if precomputed scattering coefficients are available
+    precomputed_path = scattering_cfg.get('precomputed_path')
+    use_precomputed = precomputed_path and os.path.exists(precomputed_path)
+    
     print(f"\nScattering configuration:")
     print(f"  - J: {scattering_cfg['J']}")
     print(f"  - Moments: {scattering_cfg['num_moments']}")
+    print(f"  - Precomputed path: {precomputed_path}")
+    print(f"  - Using precomputed: {use_precomputed}")
 
-    scattering_transform = FixedScatteringTransform(
-        in_channels=num_node_features,
-        J=scattering_cfg['J'],
-        num_moments=scattering_cfg['num_moments'],
-    )
-    scattering_dim = scattering_transform.out_shape()
-    print(f"  - Output dimension: {scattering_dim}")
-
-    # Pre-compute scattering coefficients
-    print("\nPre-computing scattering coefficients...")
-    for split, base_dataset in base_datasets.items():
-        datasets[split] = ScatteringDataset(
-            base_dataset, 
-            scattering_transform, 
-            show_progress=True, 
-            desc=f"Computing {split} scattering"
+    # Load or compute scattering coefficients
+    if use_precomputed:
+        print("\nLoading precomputed scattering coefficients...")
+        # For precomputed scattering, we need to use the full dataset to map indices
+        full_dataset = ZINCDataset(
+            dataset_cfg['path'] if use_single_file_format else dataset_cfg.get('train_path'),
+            prop_stat_dict=stats_path,
+            transform=None
         )
+        
+        precomputed_dataset = PrecomputedScatteringDataset(
+            scattering_path=precomputed_path,
+            base_dataset=full_dataset
+        )
+        
+        # Create subset datasets from precomputed data
+        if use_single_file_format:
+            # For MOSES-like format, create subsets based on split ranges
+            for split, base_dataset in base_datasets.items():
+                # Get indices from the subset
+                if isinstance(base_dataset, torch.utils.data.Subset):
+                    indices = base_dataset.indices
+                else:
+                    indices = list(range(len(base_dataset)))
+                
+                datasets[split] = torch.utils.data.Subset(precomputed_dataset, indices)
+                print(f"  {split}: {len(datasets[split])} molecules")
+        else:
+            # For BACE-like format, load precomputed for each split
+            # (would need split-specific precomputed paths for this to work)
+            datasets = base_datasets
+            print("Warning: Precomputed scattering not fully supported for multi-file format")
+    else:
+        # Compute scattering coefficients on the fly
+        print("\nComputing scattering coefficients...")
+        scattering_transform = FixedScatteringTransform(
+            in_channels=num_node_features,
+            J=scattering_cfg['J'],
+            num_moments=scattering_cfg['num_moments'],
+        )
+        scattering_dim = scattering_transform.out_shape()
+        print(f"  - Output dimension: {scattering_dim}")
+
+        for split, base_dataset in base_datasets.items():
+            datasets[split] = ScatteringDataset(
+                base_dataset, 
+                scattering_transform, 
+                show_progress=True, 
+                desc=f"Computing {split} scattering"
+            )
 
     # Get input dimensions
     input_dim = len(datasets[next(iter(datasets.keys()))][0][0])
@@ -475,27 +596,28 @@ def main():
         all_reconstructions = []
         all_embeddings = []
         all_properties_true = []
-        all_properties_pred = []
+        all_properties_pred = []  # all properties as regression
 
         with torch.no_grad():
             for batch_inputs, batch_properties in tqdm(loader, desc=f"Evaluating {split}"):
                 batch_inputs = batch_inputs.float()
                 
-                # Forward pass returns: x_hat, y_pred, mu, logvar, z
-                x_hat, y_pred, mu, logvar, z = model(batch_inputs)
+                # Forward pass returns: x_hat, y_full, mu, logvar, z
+                # y_full includes all properties with num_atoms as regression
+                x_hat, y_full, mu, logvar, z = model(batch_inputs)
+                
+                # Round num_atoms (last property) to whole numbers
+                y_full_rounded = y_full.clone()
+                y_full_rounded[:, -1] = torch.round(y_full[:, -1])
                 
                 # Use mu for deterministic embedding (no sampling)
                 embeddings = mu
-                
-                # If regression is not enabled, zero out predictions
-                if not reg:
-                    y_pred = torch.zeros_like(batch_properties)
 
                 all_inputs.append(batch_inputs.numpy())
                 all_reconstructions.append(x_hat.numpy())
                 all_embeddings.append(embeddings.numpy())
                 all_properties_true.append(batch_properties.numpy())
-                all_properties_pred.append(y_pred.numpy())
+                all_properties_pred.append(y_full_rounded.numpy())
 
         # Concatenate results
         all_inputs = np.concatenate(all_inputs, axis=0)
@@ -514,11 +636,15 @@ def main():
         for key, value in recon_metrics.items():
             print(f"  {key}: {value:.6f}")
 
-        # Regression metrics (if enabled)
+        # Regression metrics for all properties (including num_atoms)
         if reg:
             print("\nRegression Metrics:")
             property_names = [f"property_{i}" for i in range(num_properties)]
-            reg_metrics = compute_regression_metrics(all_properties_true, all_properties_pred, property_names)
+            reg_metrics = compute_regression_metrics(
+                all_properties_true,
+                all_properties_pred,
+                property_names
+            )
             results['regression'] = reg_metrics
             
             for prop_name, metrics in reg_metrics.items():
@@ -546,7 +672,7 @@ def main():
                 os.path.join(eval_dir, f'{split}_reconstruction_histogram.png')
             )
             
-            # Regression plots (if enabled)
+            # Regression plots (all properties)
             if reg:
                 property_names = [f"property_{i}" for i in range(num_properties)]
                 plot_regression_results(
@@ -598,6 +724,9 @@ def main():
         if 'regression' in results and 'average' in results['regression']:
             print(f"  Regression R² (avg): {results['regression']['average']['r2']:.6f}")
             print(f"  Regression RMSE (avg): {results['regression']['average']['rmse']:.6f}")
+        if 'num_atoms' in results:
+            nm = results['num_atoms']['num_atoms']
+            print(f"  Num_atoms acc: {nm['accuracy']:.6f}")
 
     print(f"\nEvaluation complete! Results saved to: {eval_dir}")
 

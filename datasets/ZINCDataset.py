@@ -69,7 +69,11 @@ class ZINCDataset(Dataset):
             #we want to zscore
             for i, entry in enumerate(self.prop_list):
                 prop_value = self.tranch[smi][entry]
-                z_scored = (prop_value - self.stats[entry]['mean']) / self.stats[entry]['std']
+                # Don't z-score num_atoms since it's discrete
+                if entry == 'num_atoms':
+                    z_scored = prop_value
+                else:
+                    z_scored = (prop_value - self.stats[entry]['mean']) / self.stats[entry]['std']
                 props[i] = z_scored
         else:
             for i, entry in enumerate(self.prop_list):
