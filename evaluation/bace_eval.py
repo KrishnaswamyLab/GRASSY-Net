@@ -185,6 +185,13 @@ class BACEBenchmark:
         else:
             prev_guide = None
 
+        # Ensure num_nodes is a tensor on the correct device
+        if num_nodes is not None:
+            if not isinstance(num_nodes, torch.Tensor):
+                num_nodes = torch.tensor([num_nodes] * batch_size, device=self.device)
+            else:
+                num_nodes = num_nodes.to(self.device)
+
         try:
             smiles_batch = self.model.generate(
                 scattering=scattering,
