@@ -116,7 +116,7 @@ def main():
     print("Step 4: Loading SMILES from raw CSV")
     print("="*60)
     
-    raw_path = Path('./data/bace/raw/bace.csv')
+    raw_path = Path('./datasets/bace/raw/bace.csv')
     if not raw_path.exists():
         raise FileNotFoundError(f"Raw BACE CSV not found at {raw_path}. Make sure PyTorch Geometric downloaded it.")
     
