@@ -21,6 +21,14 @@ scattering:
   J: 4
   num_moments: 4
 
+# Augmentation configuration (moment noise for robustness)
+augmentation:
+  moment_noise:
+    prob: 0.2           # 20% of samples get noise
+    lower_scalar: 0.25  # corrupt at least 25% of moments
+    upper_scalar: 1.0   # corrupt up to 100% of moments
+    noise_std: 0.1      # Gaussian noise std (mean=0)
+
 # Model architecture
 model:
   max_node: 50

@@ -158,6 +158,13 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self._setup_diffusion_params(checkpoint)
         
         model_cfg = self.config.get('model', {})
+        aug_cfg = self.config.get('augmentation', {})
+        moment_noise_cfg = aug_cfg.get('moment_noise', {})
+
+       
+        print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
+        print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
+
         
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
@@ -170,6 +177,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_levels=getattr(self, 'num_levels', 11),
             num_moments=getattr(self, 'num_moments', 4),
             device=self.device,
+            moment_noise_cfg=moment_noise_cfg
         )
         self.model = ScatteringTransformerAdapter(
             denoiser

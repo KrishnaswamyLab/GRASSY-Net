@@ -67,12 +67,13 @@ class ScatteringTokenizer(nn.Module):
     """
     
     def __init__(self, hidden_size=384, num_atom_types=16, num_levels=11, 
-                 num_moments=4, dropout=0.1): # should change the default to be the actual number of atom types 
+             num_moments=4, dropout=0.1, moment_noise_cfg=None): 
         super().__init__()
         self.num_atom_types = num_atom_types
         self.num_levels = num_levels
         self.num_moments = num_moments
         self.dropout = dropout
+        self.moment_noise_cfg = moment_noise_cfg or {}
     
         # Total tokens = atom tokens + level tokens
         self.num_tokens = num_atom_types + num_levels  # the double tokenization method discussed
@@ -88,6 +89,34 @@ class ScatteringTokenizer(nn.Module):
         
         # Null embedding for CFG
         self.null = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
+
+    def _apply_moment_noise(self, x):
+        """Apply moment noise augmentation during training."""
+        print(f"[DEBUG] moment_noise_cfg = {self.moment_noise_cfg}", flush=True) # debug print
+        cfg = self.moment_noise_cfg
+        prob = cfg.get('prob', 0.0)
+        if prob <= 0:
+            return x
+        
+        B, total = x.shape
+        device = x.device
+        mask = torch.rand(B, device=device) < prob
+        if not mask.any():
+            return x
+        
+        print(f"[DEBUG] Applying moment noise to {mask.sum().item()}/{B} samples", flush=True)  # debug print
+
+        noisy = x.clone()
+        lower = max(1, int(cfg.get('lower_scalar', 0.25) * total))
+        upper = int(cfg.get('upper_scalar', 1.0) * total)
+        noise_std = cfg.get('noise_std', 0.1)
+        
+        for i in range(B):
+            if mask[i]:
+                q = torch.randint(lower, upper + 1, (1,), device=device).item()
+                idx = torch.randperm(total, device=device)[:q]
+                noisy[i, idx] += torch.randn(q, device=device) * noise_std
+        return noisy    
         
 
     def forward(self, x, train=False, force_null=False):
@@ -103,6 +132,12 @@ class ScatteringTokenizer(nn.Module):
         
         if force_null:
             return self.null.expand(B, -1, -1)
+
+        print(f"[DEBUG forward] train={train}, moment_noise_cfg={self.moment_noise_cfg}", flush=True) # debug print
+
+        # Apply moment noise during training
+        if train and self.moment_noise_cfg:
+            x = self._apply_moment_noise(x)
         
         # Reshape: [B, 440] → [B, A, L, M] = [B, 10, 11, 4] -- assuming this order of extraction of moments from the GRASSY scatter model
         x = x.view(B, self.num_atom_types, self.num_levels, self.num_moments)
@@ -193,7 +228,8 @@ class ScatteringDenoiser(nn.Module):
     
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
-                 num_atom_types=16, num_levels=11, num_moments=4,device=None):
+                 num_atom_types=16, num_levels=11, num_moments=4, device=None,
+                 moment_noise_cfg=None):
         super().__init__()
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -210,7 +246,8 @@ class ScatteringDenoiser(nn.Module):
             hidden_size=hidden_size,
             num_atom_types=num_atom_types,
             num_levels=num_levels,
-            num_moments=num_moments
+            num_moments=num_moments,
+            moment_noise_cfg=moment_noise_cfg
         )
         
         # Transformer blocks
