@@ -17,7 +17,7 @@ from torch_geometric.loader import DataLoader
 from rdkit import Chem
 
 from grassy_dit.model import ScatteringDenoiser
-from utils.config_utils import config_to_hparams, load_config, apply_overrides, get_grassy_flags
+from utils.config_utils import config_to_hparams, load_config, apply_overrides
 import yaml
 import datetime
 

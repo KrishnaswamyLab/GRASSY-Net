@@ -37,7 +37,7 @@ from models.GRASSY_model import GRASSY
 from models.ScatteringTransform import GraphScatteringTransform
 from datasets.ZINCDataset import ZINCDataset
 
-from utils.config_utils import load_config, apply_overrides, config_to_hparams, get_grassy_flags
+from utils.config_utils import load_config, apply_overrides, config_to_hparams
 
 class PrecomputedScatteringDataset(torch.utils.data.Dataset):
     """Load precomputed scattering coefficients."""
@@ -378,16 +378,10 @@ def main():
     training_cfg = config['training']
     scattering_cfg = config['scattering']
 
-    # Get GRASSY version flags
-    grassy_version = training_cfg['grassy_version']
-    kl_div, reg = get_grassy_flags(grassy_version)
-
     print(f"\n{'='*60}")
     print(f"GRASSY Model Evaluation")
     print(f"{'='*60}")
-    print(f"\nGRASSY Version: {grassy_version}")
-    print(f"  - Regression enabled: {reg}")
-    print(f"  - KL Divergence enabled: {kl_div}")
+
 
     # Setup output directory
     if args.output_dir is None:
@@ -561,10 +555,6 @@ def main():
     # Create hparams and load model
     print(f"\nLoading model from: {args.checkpoint}")
     hparams = config_to_hparams(config, input_dim, num_properties,len_epoch=1)
-    
-    # Adjust alpha and beta based on GRASSY version
-    hparams.alpha = training_cfg['alpha'] if reg else 0
-    hparams.beta = training_cfg['beta'] if kl_div else 0
 
     model = GRASSY.load_from_checkpoint(args.checkpoint, hparams=hparams)
     model.eval()

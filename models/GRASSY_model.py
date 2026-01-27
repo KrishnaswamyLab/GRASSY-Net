@@ -21,7 +21,6 @@ class GRASSY(pl.LightningModule):
         self.save_hyperparameters(hparams)
 
         self.alpha = self.hparams.alpha
-        self.beta = self.hparams.beta
         self.atom_loss_weight = getattr(self.hparams, 'atom_loss_weight', 1.0)
         
         self.input_dim = self.hparams.input_dim
@@ -57,7 +56,6 @@ class GRASSY(pl.LightningModule):
         self.loss_list = []
         self.recon_loss_list = []
         self.reg_loss_list = []
-        self.kl_loss_list = []
                 
         if self.hparams.n_gpus > 0:
             self.dev_type = 'cuda'
@@ -66,13 +64,6 @@ class GRASSY(pl.LightningModule):
             self.dev_type = 'cpu'
         
         self.eps = 1e-5
-
-
-    def kl_div(self,mu, logvar):
-
-        KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
-        KLD = torch.sum(KLD_element).mul_(-0.5)
-        return KLD
         
     def encode(self, x):
 
@@ -142,7 +133,7 @@ class GRASSY(pl.LightningModule):
                         recon_x, x,  
                         mu, logvar,
                         y_full, y, 
-                        alpha, beta, batch_idx):
+                        alpha, batch_idx):
         # reconstruction loss
         recon_loss = nn.MSELoss()(recon_x.flatten(), x.flatten()) 
         # regression loss for all properties except num_atoms
@@ -151,24 +142,22 @@ class GRASSY(pl.LightningModule):
         atom_reg_loss = nn.MSELoss()(y_full[:, -1], y[:, -1])
         # Weighted sum
         reg_loss = alpha * reg_loss.mean() + self.atom_loss_weight * atom_reg_loss.mean()
-        # kl divergence 
-        KLD = self.kl_div(mu, logvar)
+        
         num_epochs = self.hparams.n_epochs - 5
         total_batches = self.hparams.len_epoch * num_epochs
         # loss annealing
         weight = min(1, float(self.trainer.global_step) / float(total_batches))
-        kl_loss = weight * KLD
-        kl_loss = beta * kl_loss
-        total_loss = recon_loss + reg_loss + kl_loss
+
+        total_loss = recon_loss + reg_loss
         self.loss_list.append(total_loss.item())
         self.recon_loss_list.append(recon_loss.item())
         self.reg_loss_list.append(reg_loss.item())
-        self.kl_loss_list.append(kl_loss.item())
+
         log_losses = {'train_loss' : total_loss.detach(), 
                     'recon_loss' : recon_loss.detach(),
                     'pred_loss' :reg_loss.detach(),
-                    'kl_loss': kl_loss.detach()
                     }
+        
         return total_loss, log_losses
 
     def get_loss_list(self):
@@ -180,20 +169,16 @@ class GRASSY(pl.LightningModule):
     def get_reg_loss_list(self):
         return self.reg_loss_list
 
-    def get_kl_loss_list(self):
-        return self.kl_loss_list
-
     def training_step(self, batch, batch_idx):
         x, y  = batch
         x = x.float()
         x_hat, y_full, mu, logvar, z = self(x)
         loss, log_losses = self.loss_multi_GRASSY(recon_x=x_hat, x=x, mu=mu, logvar=logvar, y_full=y_full, y=y,
-                                                alpha=self.hparams.alpha, beta=self.hparams.beta, batch_idx=batch_idx)
+                                                alpha=self.hparams.alpha, batch_idx=batch_idx)
         # Log metrics explicitly (required for newer PyTorch Lightning)
         self.log('train_loss', log_losses['train_loss'], on_step=True, on_epoch=True)
         self.log('recon_loss', log_losses['recon_loss'], on_step=True, on_epoch=True)
         self.log('pred_loss', log_losses['pred_loss'], on_step=True, on_epoch=True)
-        self.log('kl_loss', log_losses['kl_loss'], on_step=True, on_epoch=True)
         return loss
    
     def validation_step(self, batch, batch_idx):
@@ -208,40 +193,18 @@ class GRASSY(pl.LightningModule):
         atom_reg_loss = nn.MSELoss()(y_full[:, -1], y[:, -1])
         # Weighted sum
         reg_loss = self.alpha * reg_loss.mean() + self.atom_loss_weight * atom_reg_loss.mean()
-        # kl loss
-        kl_loss = self.kl_div(mu, logvar)
-        kl_loss = self.beta * kl_loss
-        total_loss = recon_loss + reg_loss + kl_loss
+
+        total_loss = recon_loss + reg_loss
         log_losses = {'val_loss' : total_loss.detach(), 
                     'val_recon_loss' : recon_loss.detach(),
                     'val_pred_loss' :reg_loss.detach(),
-                    'val_kl_loss': kl_loss.detach()
                     }
+        
         # Log metrics explicitly (required for checkpoint callback to monitor)
         self.log('val_loss', total_loss, on_step=False, on_epoch=True)
         self.log('val_recon_loss', recon_loss, on_step=False, on_epoch=True)
         self.log('val_pred_loss', reg_loss, on_step=False, on_epoch=True)
-        self.log('val_kl_loss', kl_loss, on_step=False, on_epoch=True)
         return log_losses
-
-    # def on_validation_epoch_end(self, outputs):
-
-    #     avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-    #     avg_reconloss = torch.stack([x['val_recon_loss'] for x in outputs]).mean()
-    #     avg_regloss = torch.stack([x['val_pred_loss'] for x in outputs]).mean()
-    #     avg_klloss = torch.stack([x['val_kl_loss'] for x in outputs]).mean()
-
-    #     tensorboard_logs = {'val_loss': avg_loss,
-    #                         'val_avg_recon_loss': avg_reconloss,
-    #                         'val_avg_pred_loss':avg_regloss,
-    #                         'val_avg_kl_loss':avg_klloss
-    #                         }
-
-    #     self.log('val_loss', avg_loss.detach())
-    #     print(avg_loss.detach())
-
-    #     return {'val_loss': avg_loss, 'log': tensorboard_logs}
-
 
     def configure_optimizers(self):
 

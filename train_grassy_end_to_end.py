@@ -34,7 +34,7 @@ from models.MLP_ScatteringTransform import GraphScatteringTransform
 from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
 from datasets.ZINCDataset import ZINCDataset
 
-from utils.config_utils import config_to_hparams, load_config, apply_overrides, get_grassy_flags
+from utils.config_utils import config_to_hparams, load_config, apply_overrides
 import yaml
 
 
@@ -62,22 +62,9 @@ def main():
     scattering_cfg = config['scattering']
     early_stopping_cfg = config.get('early_stopping', {'enabled': False})
 
-    # Get GRASSY version flags
-    grassy_version = training_cfg['grassy_version']
-    kl_div, reg = get_grassy_flags(grassy_version)
-
-    # Adjust alpha and beta based on GRASSY version
-    alpha = training_cfg['alpha'] if reg else 0
-    beta = training_cfg['beta'] if kl_div else 0
-
     print(f"\n{'='*60}")
     print(f"GRASSY Training with Learnable Scattering (End-to-End)")
     print(f"{'='*60}")
-    print(f"\nGRASSY Version: {grassy_version}")
-    print(f"  - KL Divergence: {'enabled' if kl_div else 'disabled'}")
-    print(f"  - Regression: {'enabled' if reg else 'disabled'}")
-    print(f"  - Alpha (reg weight): {alpha}")
-    print(f"  - Beta (KL weight): {beta}")
 
     # Load dataset
     print(f"\nLoading dataset: {dataset_cfg['name']}")
@@ -146,11 +133,10 @@ def main():
     # Setup logging directory
     now = datetime.datetime.now()
     date_suffix = now.strftime("%Y-%m-%d-%H-%M-%S")
-    reg_str = 'regress' if reg else 'noregress'
-    kl_str = 'kld' if kl_div else 'nokld'
+
     save_dir = os.path.join(
         logging_cfg['save_dir'],
-        f"{dataset_cfg['name']}_e2e_{reg_str}_{kl_str}_{date_suffix}/"
+        f"{dataset_cfg['name']}_e2e_{date_suffix}/"
     )
 
     if not os.path.exists(save_dir):
@@ -223,7 +209,7 @@ def main():
     grassy_model = GRASSY(hparams=hparams)
 
     # Create end-to-end wrapper
-    model = EndToEndScatteringGRASSYWrapper(scattering_transform, grassy_model, hparams, alpha, beta)
+    model = EndToEndScatteringGRASSYWrapper(scattering_transform, grassy_model, hparams)
 
     # Log hyperparameters
     if logger:
@@ -231,7 +217,6 @@ def main():
             'config': config,
             'scattering_dim': scattering_dim,
             'num_properties': num_properties,
-            'grassy_version': grassy_version,
             'scattering_J': scattering_cfg['J'],
             'scattering_moments': scattering_cfg['num_moments'],
             'mlp_hidden_dim': scattering_cfg.get('mlp_hidden_dim', 64),
@@ -264,7 +249,6 @@ def main():
     np.save(os.path.join(save_dir, f"{prefix}_total_loss_list.npy"), loss)
     np.save(os.path.join(save_dir, f"{prefix}_recon_loss_list.npy"), np.array(model.get_recon_loss_list()))
     np.save(os.path.join(save_dir, f"{prefix}_reg_loss_list.npy"), np.array(model.get_reg_loss_list()))
-    np.save(os.path.join(save_dir, f"{prefix}_kl_loss_list.npy"), np.array(model.get_kl_loss_list()))
 
     # Save best model
     print("\nSaving model...")

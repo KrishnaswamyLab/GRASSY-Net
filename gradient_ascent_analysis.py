@@ -28,7 +28,7 @@ except ImportError:
 
 from models.GRASSY_model import GRASSY
 from models.LatentOptimization import LatentOptimizer
-from utils.config_utils import load_config, config_to_hparams, get_grassy_flags
+from utils.config_utils import load_config, config_to_hparams
 
 
 def auto_detect_files(directory):
@@ -137,11 +137,6 @@ def load_model(training_dir, scattering_dim, num_properties, device):
     
     # Reconstruct hparams
     hparams = config_to_hparams(config, scattering_dim, num_properties, len_epoch=1)
-    
-    grassy_version = config['training']['grassy_version']
-    kl_div, reg = get_grassy_flags(grassy_version)
-    hparams.alpha = config['training']['alpha'] if reg else 0
-    hparams.beta = config['training']['beta'] if kl_div else 0
     
     # Load model
     model = GRASSY.load_from_checkpoint(checkpoint_path, hparams=hparams)

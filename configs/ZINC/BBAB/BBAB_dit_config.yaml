@@ -5,8 +5,8 @@
 
 # Dataset configuration
 dataset:
-  name: "moses"
-  data_dir: "grassy_dit/data/moses"
+  name: "bbab"
+  data_dir: "grassy_dit/data_bbab"
   csv_file: "molecules.csv"
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
@@ -23,21 +23,21 @@ scattering:
 
 # Model architecture
 model:
-  max_node: 50
-  hidden_size: 512
+  max_node: 18
+  hidden_size: 256
   num_layer: 12
   num_head: 16  # Note: currently forced to have same number of cross-attention heads as self-attention heads
   mlp_ratio: 4.0
 
 # Training configuration
 training:
-  epochs: 200
-  batch_size: 256
+  epochs: 2000
+  batch_size: 16
   learning_rate: 1.0e-4
 
 # Checkpoint configuration
 checkpoint:
-  save_dir: "./checkpoints/moses"
+  save_dir: "./checkpoints/zinc/bbab"
   save_best: true
   save_every_n_epochs: 2
   resume_from: None  # Path to checkpoint to resume from

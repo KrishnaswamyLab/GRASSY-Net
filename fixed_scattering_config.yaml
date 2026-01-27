@@ -40,15 +40,6 @@ training:
 
   # Loss weights
   alpha: 0.01          # Weight for regression loss
-  beta: 0.0005         # Weight for KL divergence loss
-
-  # GRASSY version: controls which losses are active
-  # Options: "AE+REG", "VAE+REG", "AE", "VAE"
-  #   - AE+REG: Autoencoder with regression (no KL loss)
-  #   - VAE+REG: Variational autoencoder with regression
-  #   - AE: Autoencoder only (no regression, no KL)
-  #   - VAE: Variational autoencoder only (no regression)
-  grassy_version: "AE+REG"
 
 # Hardware settings
 hardware:

@@ -11,6 +11,7 @@ import yaml
 import numpy as np
 from typing import Optional, List, Union
 from pathlib import Path
+from torch_geometric.data import Batch
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -211,7 +212,6 @@ def compute_scattering_from_smiles(
     Returns:
         Tensor of scattering moments [N, scattering_dim]
     """
-    from torch_geometric.data import Batch
 
     all_scattering = []
     valid_indices = []

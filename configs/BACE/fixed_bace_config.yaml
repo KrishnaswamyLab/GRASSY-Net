@@ -1,4 +1,4 @@
-# GRASSY Training Configuration with MLP Scattering Transform
+# GRASSY Training Configuration with Fixed Scattering Transform
 #
 # This config uses the non-learnable GraphScatteringTransform instead of
 # a pre-trained scattering model. The scattering coefficients are computed
@@ -6,35 +6,29 @@
 
 # Dataset settings
 dataset:
-  name: "MOSES_12K"
-  path: "datasets/MOSES_12K.npy"
-  stats_path: "datasets/MOSES_12K_stats.npy"
-
-  # Data splits
-  train_size: 10000
-  val_size: 1000
-  # test_size is computed as: len(dataset) - train_size - val_size
-
+  name: "BACE"
+  train_path: "datasets/BACE_train.npy"
+  test_path: "datasets/BACE_test.npy"
+  val_path: "datasets/BACE_val.npy"
+  stats_path: "datasets/BACE_stats.npy"
   seed: 42  # Random seed for reproducibility
 
-# MLP Scattering Transform settings
+# Fixed Scattering Transform settings
 scattering:
   J: 4              # Number of wavelet scales
   num_moments: 4    # Statistical moments (1=mean, 2=+var, 3=+skew, 4=+kurtosis)
-  mlp_hidden_dim: 64  # Hidden dimension for MLP used in scattering
   # Output dimension = num_node_features * (1 + J + J*(J-1)/2) * num_moments
   # For 16 features, J=4, moments=4: 16 * 11 * 4 = 704
 
 # Model architecture
 model:
-  bottle_dim: 25       # Bottleneck dimension (latent space)
-  hidden_dim: 100      # Hidden layer dimension
-  # input_dim is computed from scattering output
+  bottle_dim: 32       # Bottleneck dimension (latent space)
+  hidden_dim: 128      # Hidden layer dimension
 
 # Training settings
 training:
   n_epochs: 100
-  batch_size: 100
+  batch_size: 32
   learning_rate: 0.001
   num_workers: 4
 
@@ -52,7 +46,7 @@ logging:
   wandb:
     enabled: true
     entity: "grassy"
-    project: "GRASSY-MLP"
+    project: "GRASSY-FixedScattering"
 
   # Checkpoint settings
   checkpoint:

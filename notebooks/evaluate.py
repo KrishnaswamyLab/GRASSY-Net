@@ -498,7 +498,6 @@ def main():
         hidden_dim=args.hidden_dim,
         learning_rate=0.001,
         alpha=args.alpha,
-        beta=0.0,
         n_epochs=100,
         len_epoch=None,
         batch_size=args.batch_size,

@@ -28,7 +28,7 @@ import pandas as pd
 from tqdm import tqdm
 from rdkit import Chem
 from torch_geometric.datasets import MoleculeNet
-from property_utils import PROPERTIES_TO_COMPUTE, compute_props
+from datasets.property_utils import PROPERTIES_TO_COMPUTE, compute_props
 # At the top of your file, define a registry of available properties
 
 def main():
