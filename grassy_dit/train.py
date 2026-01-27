@@ -422,10 +422,6 @@ if __name__ == "__main__":
     df = pd.read_csv(os.path.join(data_dir, csv_file))
     smiles = df[smiles_col].tolist()
     scattering = np.load(os.path.join(data_dir, scatter_file))
-    
-    df = pd.read_csv(f"{data_dir}/{csv_file}")
-    smiles = df[smiles_col].tolist()
-    scattering = np.load(f"{data_dir}/{scatter_file}")
 
     # Filter incompatible molecules (dative bonds not supported by torch.molecule)
     valid_smiles = []

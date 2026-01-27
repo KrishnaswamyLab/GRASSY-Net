@@ -5,15 +5,15 @@
 
 # Dataset configuration
 dataset:
-  name: "bbab"
-  data_dir: "grassy_dit/data/data_bbab"
+  name: "jbcd"
+  data_dir: "grassy_dit/data/data_jbcd"
   csv_file: "molecules.csv"
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
   seed: 42
   
   # Validation data (optional - leave null to use train loss for checkpointing)
-  val_data_dir: grassy_dit/data/data_bbab/val
+  val_data_dir: grassy_dit/data/data_jbcd/val
   val_csv_file: null
   val_scatter_file: null
   val_every_n_epochs: 5
@@ -38,10 +38,10 @@ training:
 
 # Checkpoint configuration
 checkpoint:
-  save_dir: "./checkpoints/zinc/bbab"
+  save_dir: "./checkpoints/zinc/jbcd"
   save_best: true
   save_every_n_epochs: 2
-  resume_from: 'checkpoints/zinc/bbab/checkpoint_best.pt'  # Path to checkpoint to resume from
+  resume_from: null  # Path to checkpoint to resume from
 
 # Hardware configuration
 hardware:

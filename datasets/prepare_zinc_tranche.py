@@ -171,7 +171,7 @@ def main():
     print(f"  - {data_path} ({len(out_dict)} molecules)")
     print(f"  - {stats_path}")
     print(f"\nNext: Extract scattering moments:")
-    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset {data_path} --stats {stats_path} --output grassy_dit/data_{args.prefix.lower()} --J 4 --moments 4")
+    print(f"  python grassy_dit/extract_scattering_fixed.py --dataset {data_path} --stats {stats_path} --output grassy_dit/data/data_{args.prefix.lower()} --J 4 --moments 4")
 
 
 if __name__ == "__main__":
