@@ -246,11 +246,14 @@ def reconstruction_eval(
             device=device,
         )
         
+        # Prepare num_nodes tensor on correct device
+        num_nodes_tensor = torch.tensor([num_atoms] * attempts, device=device)
+        
         # With moments (conditioned)
         model.guide_scale = original_guide_scale
         gen_with = model.generate(
             scattering=scattering,
-            num_nodes=num_atoms,
+            num_nodes=num_nodes_tensor,
             batch_size=attempts,
         )
         if any(canonicalize(s) == ref_canon for s in gen_with if s):
@@ -260,7 +263,7 @@ def reconstruction_eval(
         model.guide_scale = 0.0
         gen_without = model.generate(
             scattering=scattering,
-            num_nodes=num_atoms,
+            num_nodes=num_nodes_tensor,
             batch_size=attempts,
         )
         if any(canonicalize(s) == ref_canon for s in gen_without if s):
@@ -354,11 +357,14 @@ def scaffold_reconstruction_eval_single(
             device=device,
         )
         
+        # Prepare num_nodes tensor on correct device
+        num_nodes_tensor = torch.tensor([num_atoms] * attempts, device=device)
+        
         # With moments (conditioned) + scaffold
         model.guide_scale = original_guide_scale
         gen_with = model.generate(
             scattering=scattering,
-            num_nodes=num_atoms,
+            num_nodes=num_nodes_tensor,
             batch_size=attempts,
             scaffold_X=scaffold_X_batch,
             scaffold_E=scaffold_E_batch,
@@ -371,7 +377,7 @@ def scaffold_reconstruction_eval_single(
         model.guide_scale = 0.0
         gen_without = model.generate(
             scattering=scattering,
-            num_nodes=num_atoms,
+            num_nodes=num_nodes_tensor,
             batch_size=attempts,
             scaffold_X=scaffold_X_batch,
             scaffold_E=scaffold_E_batch,
