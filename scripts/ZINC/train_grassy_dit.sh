@@ -1,13 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=moses_grassy_dit_fixed_scattering
-#SBATCH --time=16:00:00
-#SBATCH --cpus-per-task=32
-#SBATCH --partition=gpu_h200
+#SBATCH --job-name=BBAB_dit
+#SBATCH --time=6:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --partition=gpu_devel
 #SBATCH --gpus=1
-#SBATCH --mem=128G
-#SBATCH --output=./logs/slurm/%x_%j.out
-#SBATCH --error=./logs/slurm/%x_%j.err
+#SBATCH --mem=32G
+#SBATCH --output=./logs/slurm/ZINC/%x_%j.out
+#SBATCH --error=./logs/slurm/ZINC/%x_%j.err
 
 # Exit on error
 set -e
@@ -33,5 +33,4 @@ echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # Run training
-# python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 100 --checkpoint_dir ./checkpoints/moses
-python -m grassy_dit.train --config grassy_dit/grassy_dit_config.yaml
+python -m grassy_dit.train --config configs/ZINC/BBAB/BBAB_dit_config.yaml

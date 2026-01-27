@@ -57,7 +57,8 @@ def config_to_hparams(config: dict, input_dim: int, num_properties: int, len_epo
         hidden_dim=config['model']['hidden_dim'],
         learning_rate=config['training']['learning_rate'],
         alpha=config['training']['alpha'],
-        beta=config['training']['beta'],
+        atom_loss_weight=config['training'].get('atom_loss_weight', 1.0),
+        num_atom_classes=config['model'].get('num_atom_classes', config['dataset'].get('num_atom_classes', 64)),
         n_epochs=config['training']['n_epochs'],
         len_epoch=len_epoch,
         num_properties=num_properties,
@@ -65,14 +66,29 @@ def config_to_hparams(config: dict, input_dim: int, num_properties: int, len_epo
     )
     return hparams
 
-def get_grassy_flags(grassy_version: str) -> tuple:
-    """Get kl_div and reg flags based on GRASSY version."""
-    version_map = {
-        'AE+REG': (False, True),
-        'VAE+REG': (True, True),
-        'AE': (False, False),
-        'VAE': (True, False),
-    }
-    if grassy_version not in version_map:
-        raise ValueError(f"Unknown GRASSY version: {grassy_version}. Options: {list(version_map.keys())}")
-    return version_map[grassy_version]
+def calculate_split_sizes(total_size: int, train_pct: float, val_pct: float, test_pct: float) -> tuple:
+    """Calculate split sizes from percentages.
+    
+    Args:
+        total_size: Total number of samples in the dataset
+        train_pct: Training set percentage (0-100)
+        val_pct: Validation set percentage (0-100)
+        test_pct: Test set percentage (0-100)
+    
+    Returns:
+        Tuple of (train_size, val_size, test_size)
+    """
+    # Validate percentages
+    total_pct = train_pct + val_pct + test_pct
+    if not (99.9 <= total_pct <= 100.1):  
+        raise ValueError(f"Split percentages must sum to 100, got {total_pct} "
+                        f"(train={train_pct}, val={val_pct}, test={test_pct})")
+    
+    # Calculate sizes
+    train_size = int(total_size * train_pct / 100)
+    val_size = int(total_size * val_pct / 100)
+    
+    # Assign remainder to test set to ensure all samples are used
+    test_size = total_size - train_size - val_size
+    
+    return train_size, val_size, test_size

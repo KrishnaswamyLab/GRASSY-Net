@@ -2,6 +2,12 @@
 import argparse
 import sys
 from pathlib import Path
+import numpy as np
+import moses
+from rdkit import Chem
+from tqdm import tqdm
+from datasets.property_utils import compute_props
+from datasets.property_utils import PROPERTIES_TO_COMPUTE
 
 # Add external/moses to path before importing moses
 sys.path.insert(0, str(Path(__file__).parent.parent / "external" / "moses"))
@@ -30,84 +36,6 @@ def ensure_moses_data():
 
 ensure_moses_data()
 #####################################################################################################################################
-
-import numpy as np
-import moses
-from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors, QED
-from tqdm import tqdm
-
-def compute_props(mol):
-    """Compute properties for a molecule."""
-    out = {}
-    try:
-        out['qed'] = float(QED.qed(mol))
-    except Exception:
-        out['qed'] = float('nan')
-    
-    try:
-        out['MolWt'] = float(Descriptors.MolWt(mol))
-    except Exception:
-        out['MolWt'] = float('nan')
-    
-    try:
-        mw = out['MolWt']
-        num_H = sum([atom.GetTotalNumHs() for atom in mol.GetAtoms()])
-        out['HeavyAtomMolWt'] = mw - num_H * 1.00794 if not np.isnan(mw) else float('nan')
-    except Exception:
-        out['HeavyAtomMolWt'] = float('nan')
-    
-    try:
-        out['BalabanJ'] = float(rdMolDescriptors.CalcBalabanJ(mol))
-    except Exception:
-        out['BalabanJ'] = float('nan')
-    
-    try:
-        out['BertzCT'] = float(rdMolDescriptors.CalcBertzCT(mol))
-    except Exception:
-        out['BertzCT'] = float('nan')
-    
-    try:
-        out['Ipc'] = float(rdMolDescriptors.CalcIpc(mol))
-    except Exception:
-        out['Ipc'] = float('nan')
-    
-    try:
-        out['TPSA'] = float(rdMolDescriptors.CalcTPSA(mol))
-    except Exception:
-        out['TPSA'] = float('nan')
-    
-    try:
-        out['NumHAcceptors'] = float(rdMolDescriptors.CalcNumHBA(mol))
-    except Exception:
-        out['NumHAcceptors'] = float('nan')
-    
-    try:
-        out['NumHDonors'] = float(rdMolDescriptors.CalcNumHBD(mol))
-    except Exception:
-        out['NumHDonors'] = float('nan')
-    
-    try:
-        out['RingCount'] = float(mol.GetRingInfo().NumRings())
-    except Exception:
-        out['RingCount'] = float('nan')
-    
-    try:
-        out['MolLogP'] = float(Descriptors.MolLogP(mol))
-    except Exception:
-        out['MolLogP'] = float('nan')
-    
-    try:
-        out['SAscore'] = float(rdMolDescriptors.CalcSAScore(mol))
-    except Exception:
-        out['SAscore'] = float('nan')
-    
-    try:
-        out['FSP3'] = float(rdMolDescriptors.CalcFractionCsp3(mol))
-    except Exception:
-        out['FSP3'] = float('nan')
-    
-    return out
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Prepare MOSES dataset for GRASSY training.')
@@ -143,7 +71,7 @@ if __name__ == '__main__':
             if mol is None:
                 skipped += 1
                 continue
-            out_dict[smi] = compute_props(mol)
+            out_dict[smi] = compute_props(mol, bace_label=None)
         except Exception as e:
             skipped += 1
             continue
@@ -156,11 +84,7 @@ if __name__ == '__main__':
 
     # Compute stats (for z-scoring)
     print("\nComputing statistics...")
-    prop_list = ['qed', 'HeavyAtomMolWt', 'MolWt', \
-                #  'BalabanJ', 'BertzCT', 'Ipc', \
-                 'TPSA', 'NumHAcceptors', 'NumHDonors', 'RingCount', 'MolLogP', \
-                #  'SAscore', 'FSP3'\
-                ]
+    prop_list = PROPERTIES_TO_COMPUTE
     stats = {}
     for prop in prop_list:
         values = [out_dict[smi][prop] for smi in out_dict.keys()

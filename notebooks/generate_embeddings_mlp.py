@@ -20,7 +20,7 @@ from models.GRASSY_model import GRASSY
 from models.MLP_ScatteringTransform import GraphScatteringTransform
 from datasets.ZINCDataset import ZINCDataset
 from models.EndToEndWrapper import EndToEndScatteringGRASSYWrapper
-from utils.config_utils import config_to_hparams, load_config, get_grassy_flags
+from utils.config_utils import config_to_hparams, load_config
 
 # Usage:
 # python -m notebooks.generate_embeddings_mlp --save_dir outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29 --model_path outputs/MOSES_12K_e2e_regress_nokld_2026-01-21-18-20-29/best-epoch=74-val_loss=0.005.ckpt
@@ -45,20 +45,13 @@ class ScatteringDataset(torch.utils.data.Dataset):
 def create_model(config, scattering_dim, num_properties, device):
     """Create and return the GRASSY model."""
     training_cfg = config['training']
-    grassy_version = training_cfg['grassy_version']
-    kl_div, reg = get_grassy_flags(grassy_version)
-    
-    alpha = training_cfg['alpha'] if reg else 0
-    beta = training_cfg['beta'] if kl_div else 0
     
     len_epoch = 1  # Not needed for inference
     hparams = config_to_hparams(config, scattering_dim, num_properties, len_epoch)
-    hparams.alpha = alpha
-    hparams.beta = beta
-    
+
     grassy_model = GRASSY(hparams=hparams)
     
-    return grassy_model, hparams, alpha, beta
+    return grassy_model, hparams
 
 
 def load_model_weights(model, model_path, device):
@@ -163,8 +156,7 @@ def main(args):
     
     print("Config loaded successfully!")
     print(f"Dataset: {dataset_cfg['name']}")
-    print(f"GRASSY version: {training_cfg['grassy_version']}")
-    
+
     # Load dataset
     no_transform_dataset = ZINCDataset(dataset_cfg['path'])
     base_dataset = ZINCDataset(
@@ -191,12 +183,12 @@ def main(args):
     
     # Create model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    grassy_model, hparams, alpha, beta = create_model(
+    grassy_model, hparams = create_model(
         config, scattering_dim, base_dataset.num_classes, device
     )
     
     model = EndToEndScatteringGRASSYWrapper(
-        scattering_transform, grassy_model, hparams, alpha, beta
+        scattering_transform, grassy_model, hparams
     )
     print("Model architecture created!")
     

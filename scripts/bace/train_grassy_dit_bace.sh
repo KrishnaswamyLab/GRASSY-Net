@@ -33,5 +33,4 @@ echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # Run training
-# python -m grassy_dit.train --data_dir grassy_dit/data/moses --epochs 100 --checkpoint_dir ./checkpoints/moses
-python -m grassy_dit.train --config grassy_dit/bace_grassy_dit_config.yaml
+python -m grassy_dit.train --config configs/BACE/bace_grassy_dit_config.yaml

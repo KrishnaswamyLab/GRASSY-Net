@@ -29,7 +29,7 @@ from models.GRASSY_model import GRASSY
 from models.ScatteringTransform import GraphScatteringTransform
 from datasets.ZINCDataset import ZINCDataset
 
-from utils.config_utils import load_config, apply_overrides, config_to_hparams, get_grassy_flags
+from utils.config_utils import load_config, apply_overrides, config_to_hparams
 
 
 class FixedScatteringTransform:
@@ -107,22 +107,10 @@ def main():
     scattering_cfg = config['scattering']
     early_stopping_cfg = config.get('early_stopping', {'enabled': False})
 
-    # Get GRASSY version flags
-    grassy_version = training_cfg['grassy_version']
-    kl_div, reg = get_grassy_flags(grassy_version)
-
-    # Adjust alpha and beta based on GRASSY version
-    alpha = training_cfg['alpha'] if reg else 0
-    beta = training_cfg['beta'] if kl_div else 0
 
     print(f"\n{'='*60}")
     print(f"GRASSY Training with Fixed Scattering Transform")
     print(f"{'='*60}")
-    print(f"\nGRASSY Version: {grassy_version}")
-    print(f"  - KL Divergence: {'enabled' if kl_div else 'disabled'}")
-    print(f"  - Regression: {'enabled' if reg else 'disabled'}")
-    print(f"  - Alpha (reg weight): {alpha}")
-    print(f"  - Beta (KL weight): {beta}")
 
     # Load train, val, and test datasets from separate files
     print(f"\nLoading datasets: {dataset_cfg['name']}")
@@ -152,7 +140,6 @@ def main():
         prop_stat_dict=stats_path,
         transform=None
     )
-    
     print(f"\nLoaded datasets:")
     print(f"  - Train: {len(train_base_dataset)} molecules")
     print(f"  - Val: {len(val_base_dataset)} molecules")
@@ -160,7 +147,6 @@ def main():
     print(f"  - Total: {len(train_base_dataset) + len(val_base_dataset) + len(test_base_dataset)} molecules")
     print(f"Node features: {train_base_dataset.num_node_features}")
     print(f"Properties: {train_base_dataset.num_classes}")
-
     # Create fixed scattering transform
     print(f"\nScattering configuration:")
     print(f"  - Wavelet scales (J): {scattering_cfg['J']}")
@@ -208,11 +194,10 @@ def main():
     # Setup logging directory
     now = datetime.datetime.now()
     date_suffix = now.strftime("%Y-%m-%d-%H-%M-%S")
-    reg_str = 'regress' if reg else 'noregress'
-    kl_str = 'kld' if kl_div else 'nokld'
+
     save_dir = os.path.join(
         logging_cfg['save_dir'],
-        f"{dataset_cfg['name']}_fixed_{reg_str}_{kl_str}_{date_suffix}/"
+        f"{dataset_cfg['name']}_fixed_{date_suffix}/"
     )
 
     if not os.path.exists(save_dir):
@@ -232,7 +217,7 @@ def main():
         logger = WandbLogger(
             project=wandb_cfg['project'],
             entity=wandb_cfg['entity'],
-            name=f"{dataset_cfg['name']}_fixed_{reg_str}_{kl_str}",
+            name=f"{dataset_cfg['name']}_fixed_{date_suffix}",
             save_dir=save_dir,
         )
 
@@ -279,8 +264,6 @@ def main():
 
     # Create hparams and model
     hparams = config_to_hparams(config, input_dim, num_properties, len_epoch)
-    hparams.alpha = alpha
-    hparams.beta = beta
 
     model = GRASSY(hparams=hparams)
 
@@ -290,7 +273,6 @@ def main():
             'config': config,
             'input_dim': input_dim,
             'num_properties': num_properties,
-            'grassy_version': grassy_version,
             'scattering_J': scattering_cfg['J'],
             'scattering_moments': scattering_cfg['num_moments'],
         })
@@ -320,12 +302,11 @@ def main():
         loss = model.get_loss_list()
 
     loss = np.array(loss)
-    prefix = f"{dataset_cfg['name']}_{reg_str}_{kl_str}"
+    prefix = f"{dataset_cfg['name']}_fixed"
 
     np.save(os.path.join(save_dir, f"{prefix}_total_loss_list.npy"), loss)
     np.save(os.path.join(save_dir, f"{prefix}_recon_loss_list.npy"), np.array(model.get_recon_loss_list()))
     np.save(os.path.join(save_dir, f"{prefix}_reg_loss_list.npy"), np.array(model.get_reg_loss_list()))
-    np.save(os.path.join(save_dir, f"{prefix}_kl_loss_list.npy"), np.array(model.get_kl_loss_list()))
 
     # Save best model
     print("\nSaving model...")

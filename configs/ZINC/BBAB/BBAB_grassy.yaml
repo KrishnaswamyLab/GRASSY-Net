@@ -6,17 +6,22 @@
 
 # Dataset settings
 dataset:
-  name: "BACE"
-  train_path: "datasets/BACE_train.npy"
-  test_path: "datasets/BACE_test.npy"
-  val_path: "datasets/BACE_val.npy"
-  stats_path: "datasets/BACE_stats.npy"
+  name: "BBAB"
+  path: "datasets/ZINC_tranches/BBAB/BBAB.npy"
+  stats_path: "datasets/ZINC_tranches/BBAB/BBAB_stats.npy"
+
+  # Data splits
+  train_pct: 80    # 80% for training
+  val_pct: 10      # 10% for validation
+  test_pct: 10     # 10% for testing
+
   seed: 42  # Random seed for reproducibility
 
 # Fixed Scattering Transform settings
 scattering:
   J: 4              # Number of wavelet scales
   num_moments: 4    # Statistical moments (1=mean, 2=+var, 3=+skew, 4=+kurtosis)
+  precomputed_path: "grassy_dit/data_bbab/scattering_moments.npy"
   # Output dimension = num_node_features * (1 + J + J*(J-1)/2) * num_moments
   # For 16 features, J=4, moments=4: 16 * 11 * 4 = 704
 
@@ -24,25 +29,17 @@ scattering:
 model:
   bottle_dim: 32       # Bottleneck dimension (latent space)
   hidden_dim: 128      # Hidden layer dimension
+  # input_dim is computed from scattering output
 
 # Training settings
 training:
   n_epochs: 100
-  batch_size: 32
+  batch_size: 64
   learning_rate: 0.001
   num_workers: 4
 
   # Loss weights
   alpha: 0.01          # Weight for regression loss
-  beta: 0.0005         # Weight for KL divergence loss
-
-  # GRASSY version: controls which losses are active
-  # Options: "AE+REG", "VAE+REG", "AE", "VAE"
-  #   - AE+REG: Autoencoder with regression (no KL loss)
-  #   - VAE+REG: Variational autoencoder with regression
-  #   - AE: Autoencoder only (no regression, no KL)
-  #   - VAE: Variational autoencoder only (no regression)
-  grassy_version: "AE+REG"
 
 # Hardware settings
 hardware:
@@ -66,7 +63,7 @@ logging:
 
 # Early stopping (optional - disabled by default)
 early_stopping:
-  enabled: false
+  enabled: true
   monitor: "val_loss"
   patience: 10
   min_delta: 0.0
