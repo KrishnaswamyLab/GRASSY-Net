@@ -67,4 +67,6 @@ wandb/
 # !external/moses/**/*.csv
 
 #Ignore .npy
-*.npy
+*.npyevaluation/results/
+grassy_dit/data/scattering_moments.npy
+evaluation/results/
