@@ -30,13 +30,14 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
+    confusion_matrix,
 )
 import matplotlib.pyplot as plt
 
 from models.GRASSY_model import GRASSY
 from models.ScatteringTransform import GraphScatteringTransform
 from datasets.ZINCDataset import ZINCDataset
-
+import seaborn as sns
 from utils.config_utils import load_config, apply_overrides, config_to_hparams
 
 class PrecomputedScatteringDataset(torch.utils.data.Dataset):
@@ -115,6 +116,106 @@ class ScatteringDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.coefficients[idx], self.properties[idx]
+
+def plot_num_atoms_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, save_path: str):
+    """
+    Plot confusion matrix for num_atoms prediction.
+    
+    Args:
+        y_true: Ground truth num_atoms values (will be rounded to int)
+        y_pred: Predicted num_atoms values (will be rounded to int)
+        save_path: Path to save the plot
+    """
+    # Round to integers for confusion matrix
+    y_true_int = np.round(y_true).astype(int)
+    y_pred_int = np.round(y_pred).astype(int)
+    
+    # Get unique labels (union of true and predicted)
+    all_labels = np.union1d(y_true_int, y_pred_int)
+    
+    # Compute confusion matrix
+    cm = confusion_matrix(y_true_int, y_pred_int, labels=all_labels)
+    
+    # Compute accuracy
+    accuracy = accuracy_score(y_true_int, y_pred_int)
+    
+    # Create figure with appropriate size based on number of classes
+    n_classes = len(all_labels)
+    fig_size = max(8, n_classes * 0.5)
+    fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+    
+    # Plot heatmap
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        xticklabels=all_labels,
+        yticklabels=all_labels,
+        ax=ax,
+        cbar_kws={'label': 'Count'}
+    )
+    
+    ax.set_xlabel('Predicted num_atoms')
+    ax.set_ylabel('True num_atoms')
+    ax.set_title(f'Num_atoms Confusion Matrix\nAccuracy: {accuracy:.4f}')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    return cm, accuracy, all_labels
+
+
+def plot_num_atoms_confusion_matrix_normalized(y_true: np.ndarray, y_pred: np.ndarray, save_path: str):
+    """
+    Plot normalized confusion matrix for num_atoms prediction.
+    
+    Args:
+        y_true: Ground truth num_atoms values (will be rounded to int)
+        y_pred: Predicted num_atoms values (will be rounded to int)
+        save_path: Path to save the plot
+    """
+    # Round to integers for confusion matrix
+    y_true_int = np.round(y_true).astype(int)
+    y_pred_int = np.round(y_pred).astype(int)
+    
+    # Get unique labels (union of true and predicted)
+    all_labels = np.union1d(y_true_int, y_pred_int)
+    
+    # Compute confusion matrix and normalize by row (true labels)
+    cm = confusion_matrix(y_true_int, y_pred_int, labels=all_labels)
+    cm_normalized = cm.astype('float') / cm.sum(axis=1, keepdims=True)
+    cm_normalized = np.nan_to_num(cm_normalized)  # Handle division by zero
+    
+    # Create figure with appropriate size based on number of classes
+    n_classes = len(all_labels)
+    fig_size = max(8, n_classes * 0.5)
+    fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+    
+    # Plot heatmap
+    sns.heatmap(
+        cm_normalized,
+        annot=True,
+        fmt='.2f',
+        cmap='Blues',
+        xticklabels=all_labels,
+        yticklabels=all_labels,
+        ax=ax,
+        vmin=0,
+        vmax=1,
+        cbar_kws={'label': 'Proportion'}
+    )
+    
+    ax.set_xlabel('Predicted num_atoms')
+    ax.set_ylabel('True num_atoms')
+    ax.set_title('Num_atoms Confusion Matrix (Normalized by Row)')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    return cm_normalized
 
 def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray, property_names: list = None) -> dict:
     """
@@ -411,11 +512,9 @@ def main():
     use_single_file_format = 'path' in dataset_cfg and 'train_path' not in dataset_cfg
     
     if use_single_file_format:
-        # Single file format with train_size and val_size (MOSES-like)
+        # Single file format - can use percentages or absolute sizes
         print(f"\nDetected single-file dataset format")
         dataset_path = dataset_cfg.get('path')
-        train_size = dataset_cfg.get('train_size')
-        val_size = dataset_cfg.get('val_size')
         
         if not dataset_path:
             raise ValueError("Dataset config missing 'path' for single-file format")
@@ -429,25 +528,44 @@ def main():
         total_size = len(full_dataset)
         print(f"  Total: {total_size} molecules")
         
-        # Calculate splits
-        test_size = total_size - train_size - val_size
+        # Check if using percentages or absolute sizes
+        if 'train_pct' in dataset_cfg:
+            # Using percentages
+            from utils.config_utils import calculate_split_sizes
+            train_pct = dataset_cfg['train_pct']
+            val_pct = dataset_cfg['val_pct']
+            test_pct = dataset_cfg['test_pct']
+            train_size, val_size, test_size = calculate_split_sizes(
+                total_size, train_pct, val_pct, test_pct
+            )
+            print(f"  Using percentage splits: train={train_pct}%, val={val_pct}%, test={test_pct}%")
+            print(f"  Calculated sizes: train={train_size}, val={val_size}, test={test_size}")
+        else:
+            # Using absolute sizes
+            train_size = dataset_cfg.get('train_size')
+            val_size = dataset_cfg.get('val_size')
+            if train_size is None or val_size is None:
+                raise ValueError("Config must specify either (train_pct, val_pct, test_pct) or (train_size, val_size)")
+            test_size = total_size - train_size - val_size
+            print(f"  Using absolute sizes: train={train_size}, val={val_size}, test={test_size}")
         
-        # Create split indices
-        train_start, train_end = 0, train_size
-        val_start, val_end = train_size, train_size + val_size
-        test_start, test_end = train_size + val_size, total_size
+        # Create splits using random_split to match training
+        seed = dataset_cfg.get('seed', 42)
+        train_set, val_set, test_set = torch.utils.data.random_split(
+            full_dataset,
+            [train_size, val_size, test_size],
+            generator=torch.Generator().manual_seed(seed)
+        )
         
-        split_ranges = {
-            'train': (train_start, train_end),
-            'val': (val_start, val_end),
-            'test': (test_start, test_end),
+        split_sets = {
+            'train': train_set,
+            'val': val_set,
+            'test': test_set,
         }
         
         for split in splits_to_eval:
-            if split in split_ranges:
-                start, end = split_ranges[split]
-                indices = list(range(start, end))
-                base_datasets[split] = torch.utils.data.Subset(full_dataset, indices)
+            if split in split_sets:
+                base_datasets[split] = split_sets[split]
                 print(f"  {split}: {len(base_datasets[split])} molecules")
     else:
         # Multi-file format with separate paths (BACE-like)
@@ -501,30 +619,55 @@ def main():
     # Load or compute scattering coefficients
     if use_precomputed:
         print("\nLoading precomputed scattering coefficients...")
-        # For precomputed scattering, we need to use the full dataset to map indices
-        full_dataset = ZINCDataset(
-            dataset_cfg['path'] if use_single_file_format else dataset_cfg.get('train_path'),
-            prop_stat_dict=stats_path,
-            transform=None
-        )
         
-        precomputed_dataset = PrecomputedScatteringDataset(
-            scattering_path=precomputed_path,
-            base_dataset=full_dataset
-        )
-        
-        # Create subset datasets from precomputed data
         if use_single_file_format:
-            # For MOSES-like format, create subsets based on split ranges
-            for split, base_dataset in base_datasets.items():
-                # Get indices from the subset
-                if isinstance(base_dataset, torch.utils.data.Subset):
-                    indices = base_dataset.indices
-                else:
-                    indices = list(range(len(base_dataset)))
-                
-                datasets[split] = torch.utils.data.Subset(precomputed_dataset, indices)
-                print(f"  {split}: {len(datasets[split])} molecules")
+            # Load the full dataset for precomputed mapping
+            full_dataset_for_scatter = ZINCDataset(
+                dataset_cfg['path'],
+                prop_stat_dict=stats_path,
+                transform=None
+            )
+            
+            precomputed_dataset = PrecomputedScatteringDataset(
+                scattering_path=precomputed_path,
+                base_dataset=full_dataset_for_scatter
+            )
+            
+            # Re-create the same splits as training using the precomputed dataset
+            seed = dataset_cfg.get('seed', 42)
+            
+            # Check if using percentages or absolute sizes
+            if 'train_pct' in dataset_cfg:
+                from utils.config_utils import calculate_split_sizes
+                total_size = len(precomputed_dataset)
+                train_size, val_size, test_size = calculate_split_sizes(
+                    total_size, 
+                    dataset_cfg['train_pct'], 
+                    dataset_cfg['val_pct'], 
+                    dataset_cfg['test_pct']
+                )
+            else:
+                train_size = dataset_cfg.get('train_size')
+                val_size = dataset_cfg.get('val_size')
+                total_size = len(precomputed_dataset)
+                test_size = total_size - train_size - val_size
+            
+            train_set, val_set, test_set = torch.utils.data.random_split(
+                precomputed_dataset,
+                [train_size, val_size, test_size],
+                generator=torch.Generator().manual_seed(seed)
+            )
+            
+            split_sets = {
+                'train': train_set,
+                'val': val_set,
+                'test': test_set,
+            }
+            
+            for split in splits_to_eval:
+                if split in split_sets:
+                    datasets[split] = split_sets[split]
+                    print(f"  {split}: {len(datasets[split])} molecules")
         else:
             # For BACE-like format, load precomputed for each split
             # (would need split-specific precomputed paths for this to work)
@@ -586,19 +729,16 @@ def main():
         all_reconstructions = []
         all_embeddings = []
         all_properties_true = []
-        all_properties_pred = []  # all properties as regression
+        all_properties_pred = []  # all properties including num_atoms (regression)
+        all_num_atoms_true = []
+        all_num_atoms_pred = []  # num_atoms predictions (will be rounded for metrics)
 
         with torch.no_grad():
             for batch_inputs, batch_properties in tqdm(loader, desc=f"Evaluating {split}"):
                 batch_inputs = batch_inputs.float()
                 
-                # Forward pass returns: x_hat, y_full, mu, logvar, z
-                # y_full includes all properties with num_atoms as regression
-                x_hat, y_full, mu, logvar, z = model(batch_inputs)
-                
-                # Round num_atoms (last property) to whole numbers
-                y_full_rounded = y_full.clone()
-                y_full_rounded[:, -1] = torch.round(y_full[:, -1])
+                # Forward pass returns: x_hat, y_full, num_atoms_logits, mu, logvar, z
+                x_hat, y_full, num_atoms_logits, mu, logvar, z = model(batch_inputs)
                 
                 # Use mu for deterministic embedding (no sampling)
                 embeddings = mu
@@ -606,8 +746,10 @@ def main():
                 all_inputs.append(batch_inputs.numpy())
                 all_reconstructions.append(x_hat.numpy())
                 all_embeddings.append(embeddings.numpy())
-                all_properties_true.append(batch_properties.numpy())
-                all_properties_pred.append(y_full_rounded.numpy())
+                all_properties_true.append(batch_properties[:, :-1].numpy())  # All except num_atoms
+                all_properties_pred.append(y_full[:, :-1].numpy())   # All except num_atoms
+                all_num_atoms_true.append(batch_properties[:, -1].numpy())    # num_atoms (ground truth)
+                all_num_atoms_pred.append(torch.argmax(num_atoms_logits, dim=1).numpy())  # num_atoms (predicted class)
 
         # Concatenate results
         all_inputs = np.concatenate(all_inputs, axis=0)
@@ -615,7 +757,9 @@ def main():
         all_embeddings = np.concatenate(all_embeddings, axis=0)
         all_properties_true = np.concatenate(all_properties_true, axis=0)
         all_properties_pred = np.concatenate(all_properties_pred, axis=0)
-
+        all_num_atoms_true = np.concatenate(all_num_atoms_true, axis=0).astype(int)
+        all_num_atoms_pred = np.concatenate(all_num_atoms_pred, axis=0).round().astype(int)
+        all_num_atoms_pred = all_num_atoms_pred + 7
         # Compute metrics
         results = {'split': split, 'n_samples': len(dataset)}
 
@@ -626,21 +770,31 @@ def main():
         for key, value in recon_metrics.items():
             print(f"  {key}: {value:.6f}")
 
-        # Regression metrics for all properties (including num_atoms)
-        if reg:
-            print("\nRegression Metrics:")
-            property_names = [f"property_{i}" for i in range(num_properties)]
-            reg_metrics = compute_regression_metrics(
-                all_properties_true,
-                all_properties_pred,
-                property_names
-            )
-            results['regression'] = reg_metrics
-            
-            for prop_name, metrics in reg_metrics.items():
-                print(f"\n  {prop_name}:")
-                for key, value in metrics.items():
-                    print(f"    {key}: {value:.6f}")
+        # Regression metrics for properties (excluding num_atoms)
+        print("\nRegression Metrics:")
+        property_names = [f"property_{i}" for i in range(num_properties - 1)]
+        reg_metrics = compute_regression_metrics(
+            all_properties_true,
+            all_properties_pred,
+            property_names
+        )
+        results['regression'] = reg_metrics
+        
+        for prop_name, metrics in reg_metrics.items():
+            print(f"\n  {prop_name}:")
+            for key, value in metrics.items():
+                print(f"    {key}: {value:.6f}")
+        
+        # Num Atoms Classification Metrics
+        print("\nNum Atoms Classification Metrics:")
+        num_atoms_accuracy = accuracy_score(all_num_atoms_true.astype(int), all_num_atoms_pred)
+        num_atoms_mae = mean_absolute_error(all_num_atoms_true, all_num_atoms_pred)
+        results['num_atoms'] = {
+            'accuracy': float(num_atoms_accuracy),
+            'mae': float(num_atoms_mae)
+        }
+        print(f"  Accuracy: {num_atoms_accuracy:.4f}")
+        print(f"  MAE: {num_atoms_mae:.4f}")
 
         all_results[split] = results
 
@@ -650,6 +804,8 @@ def main():
         np.save(os.path.join(eval_dir, f'{split}_reconstructions.npy'), all_reconstructions)
         np.save(os.path.join(eval_dir, f'{split}_properties_true.npy'), all_properties_true)
         np.save(os.path.join(eval_dir, f'{split}_properties_pred.npy'), all_properties_pred)
+        np.save(os.path.join(eval_dir, f'{split}_num_atoms_true.npy'), all_num_atoms_true)
+        np.save(os.path.join(eval_dir, f'{split}_num_atoms_pred.npy'), all_num_atoms_pred)
 
         # Generate plots
         if not args.no_plots:
@@ -662,15 +818,14 @@ def main():
                 os.path.join(eval_dir, f'{split}_reconstruction_histogram.png')
             )
             
-            # Regression plots (all properties)
-            if reg:
-                property_names = [f"property_{i}" for i in range(num_properties)]
-                plot_regression_results(
-                    all_properties_true,
-                    all_properties_pred,
-                    property_names,
-                    os.path.join(eval_dir, f'{split}_regression_scatter.png')
-                )
+            # Regression plots (properties excluding num_atoms)
+            property_names = [f"property_{i}" for i in range(num_properties - 1)]
+            plot_regression_results(
+                all_properties_true,
+                all_properties_pred,
+                property_names,
+                os.path.join(eval_dir, f'{split}_regression_scatter.png')
+            )
             
             # Latent space visualization
             property_names = [f"property_{i}" for i in range(num_properties)]
@@ -680,6 +835,22 @@ def main():
                 property_names,
                 os.path.join(eval_dir, f'{split}_latent_space.png')
             )
+            # Num_atoms confusion matrix
+            print(f"Generating num_atoms confusion matrix for {split}...")
+            cm, cm_accuracy, labels = plot_num_atoms_confusion_matrix(
+                all_num_atoms_true,
+                all_num_atoms_pred,
+                os.path.join(eval_dir, f'{split}_num_atoms_confusion_matrix.png')
+            )
+            print(f"  Confusion matrix saved with {len(labels)} unique atom counts")
+            
+            # Normalized confusion matrix
+            plot_num_atoms_confusion_matrix_normalized(
+                all_num_atoms_true,
+                all_num_atoms_pred,
+                os.path.join(eval_dir, f'{split}_num_atoms_confusion_matrix_normalized.png')
+            )
+            print(f"  Normalized confusion matrix saved")
 
     # Save all results to YAML
     results_path = os.path.join(eval_dir, 'evaluation_results.yaml')
@@ -715,8 +886,8 @@ def main():
             print(f"  Regression R² (avg): {results['regression']['average']['r2']:.6f}")
             print(f"  Regression RMSE (avg): {results['regression']['average']['rmse']:.6f}")
         if 'num_atoms' in results:
-            nm = results['num_atoms']['num_atoms']
-            print(f"  Num_atoms acc: {nm['accuracy']:.6f}")
+            print(f"  Num Atoms Accuracy: {results['num_atoms']['accuracy']:.4f}")
+            print(f"  Num Atoms MAE: {results['num_atoms']['mae']:.4f}")
 
     print(f"\nEvaluation complete! Results saved to: {eval_dir}")
 

@@ -162,8 +162,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         moment_noise_cfg = aug_cfg.get('moment_noise', {})
 
        
-        print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
-        print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
+        # print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
+        # print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
 
         
         denoiser = ScatteringDenoiser(
@@ -329,7 +329,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         if scattering.dim() == 1:
             scattering = scattering.unsqueeze(0).expand(batch_size, -1).clone()
         if isinstance(num_nodes, int):
-            num_nodes = torch.full((len(scattering),), num_nodes, dtype=torch.long)
+            num_nodes = torch.full((len(scattering),), num_nodes, dtype=torch.long, device=self.device)
         
         # No scaffold - use parent directly
         if scaffold_X is None:

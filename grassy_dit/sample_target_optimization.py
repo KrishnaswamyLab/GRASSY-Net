@@ -242,7 +242,7 @@ def smiles_to_scaffold(full_smiles, max_nodes, atom_decoder, bond_decoder=None,
 def main():
     parser = argparse.ArgumentParser(description='Generate molecules with GRASSY-DiT')
     parser.add_argument('--checkpoint', required=True, help='Path to model checkpoint')
-    parser.add_argument('--config', default='grassy_dit/grassy_dit_config.yaml', help='Path to config yaml')
+    parser.add_argument('--config', default='configs/ZINC/BBAB/BBAB_dit_config.yaml', help='Path to config yaml')
     parser.add_argument('--grassy_checkpoint_dir', required=True, help='Path to GRASSY autoencoder checkpoint')
     parser.add_argument('--num_samples', type=int, default=10, help='Number of samples per scattering')
     parser.add_argument('--num_nodes', type=int, default=None, help='Number of atoms (None = sample from training dist)')
@@ -254,7 +254,7 @@ def main():
     parser.add_argument('--output', default='generated.txt', help='Output file')
     parser.add_argument('--save_trajectory', action='store_true',help='Save optimization trajectory')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu',help='Device to use')
-    parser.add_argument('--property_idx', type=int, default=0, help='Index of property to optimize')
+    parser.add_argument('--property_idx', type=int, default=4, help='Index of property to optimize')
     parser.add_argument('--step_size_latent', type=float, default=0.1, help='Step size for latent optimization')
     parser.add_argument('--n_steps_latent', type=int, default=20, help='Number of gradient ascent steps')
     args = parser.parse_args()

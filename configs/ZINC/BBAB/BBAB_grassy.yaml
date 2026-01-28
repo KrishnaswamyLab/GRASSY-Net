@@ -21,25 +21,28 @@ dataset:
 scattering:
   J: 4              # Number of wavelet scales
   num_moments: 4    # Statistical moments (1=mean, 2=+var, 3=+skew, 4=+kurtosis)
-  precomputed_path: "grassy_dit/data_bbab/scattering_moments.npy"
+  precomputed_path: "grassy_dit/data/data_bbab/scattering_moments.npy"
   # Output dimension = num_node_features * (1 + J + J*(J-1)/2) * num_moments
   # For 16 features, J=4, moments=4: 16 * 11 * 4 = 704
 
 # Model architecture
 model:
   bottle_dim: 32       # Bottleneck dimension (latent space)
-  hidden_dim: 128      # Hidden layer dimension
+  hidden_dim: 64      # Hidden layer dimension
+  num_atom_classes: 13 # Number of unique atom counts (7-19 atoms = 13 classes)
   # input_dim is computed from scattering output
+  # num_atoms is predicted via separate classification head
 
 # Training settings
 training:
-  n_epochs: 100
+  n_epochs: 200
   batch_size: 64
   learning_rate: 0.001
   num_workers: 4
 
   # Loss weights
-  alpha: 0.01          # Weight for regression loss
+  alpha: 1.0          # Weight for regression loss (properties)
+  atom_loss_weight: 1.0  # Weight for atom count regression loss
 
 # Hardware settings
 hardware:

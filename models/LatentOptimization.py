@@ -8,10 +8,11 @@ from typing import Optional, Tuple, List
 
 
 class LatentOptimizer:
-    def __init__(self, model, property_idx: int = 0, step_size: float = 0.1):
+    def __init__(self, model, property_idx: int = 0, step_size: float = 0.1, noise_scale: float = 0.0):
         self.model = model
         self.property_idx = property_idx
         self.step_size = step_size
+        self.noise_scale = noise_scale
         self.device = next(model.parameters()).device
     
     def _property_step(self, z):
@@ -23,12 +24,20 @@ class LatentOptimizer:
         
         target_property = y_full[:, self.property_idx]
         
-        loss = -target_property.mean()
+        loss = target_property.mean()
         loss.backward(retain_graph=True)
-        
-        # Gradient ascent step
+        # Normalize gradient before update
         if z.grad is not None:
-            z_updated = z + self.step_size * z.grad
+            grad_norm = torch.norm(z.grad, dim=-1, keepdim=True)
+            normalized_grad = z.grad / (grad_norm + 1e-8)  # Add small epsilon to avoid division by zero
+            z_updated = z + self.step_size * normalized_grad
+        # Gradient ascent step with optional noise
+        # if z.grad is not None:
+        #     z_updated = z + self.step_size * z.grad
+            # Add Gaussian noise for stochastic trajectories
+            if self.noise_scale > 0:
+                noise = torch.randn_like(z_updated) * self.noise_scale
+                z_updated = z_updated + noise
         else:
             z_updated = z
         

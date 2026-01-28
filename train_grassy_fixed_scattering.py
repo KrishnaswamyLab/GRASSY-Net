@@ -48,6 +48,7 @@ class PrecomputedScatteringDataset(torch.utils.data.Dataset):
         for i in range(len(base_dataset)):
             y = base_dataset[i].y
             y = y.squeeze(0).float()  # [1, 5] -> [5]
+            y[-1] = y[-1] - 7
             self.properties.append(y)
         
         assert len(self.coefficients) == len(self.properties), \
@@ -150,10 +151,19 @@ def main():
         prop_stat_dict=dataset_cfg.get('stats_path'),
         transform=None
     )
+    # Get range of number of atoms
+    num_atoms_list = []
+    for data in base_dataset:
+        num_atoms_list.append(data.x.size(0))
+    min_atoms = min(num_atoms_list)
+    max_atoms = max(num_atoms_list)
+    print(f"Number of atoms range: {min_atoms} to {max_atoms}")
     print(f"Loaded {len(base_dataset)} molecules")
     print(f"Node features: {base_dataset.num_node_features}")
     print(f"Properties: {base_dataset.num_classes}")
-
+    print(f"Loaded {len(base_dataset)} molecules")
+    print(f"Node features: {base_dataset.num_node_features}")
+    print(f"Properties: {base_dataset.num_classes}")
     # Create fixed scattering transform
     print(f"\nScattering configuration:")
     print(f"  - Wavelet scales (J): {scattering_cfg['J']}")

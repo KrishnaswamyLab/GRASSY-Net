@@ -15,6 +15,7 @@ def compute_props(mol, bace_label=None):
         try:
             out[prop_name] = float(compute_fn(mol))
         except Exception:
+            print(f"Warning: Failed to compute property '{prop_name}' for molecule. Setting as NaN.")
             out[prop_name] = float('nan')
     
     # Special case: BACE activity label (always include if provided)
@@ -59,16 +60,15 @@ def compute_num_atoms(mol):
 
 PROPERTIES_TO_COMPUTE = [
     'qed',
-    'HeavyAtomMolWt',
-    'MolWt',
-    'TPSA',
+    # 'HeavyAtomMolWt',
+    # 'MolWt',
+    # 'TPSA',
     'MolLogP',
-    'num_atoms'
-    #BELOW PROPERTIES ARE NOT CONSIDERED FOR MOSES
     # 'SAS',
     # 'BalabanJ',
     # 'BertzCT',
-    # 'FSP3'
+    # 'FSP3',
+    'num_atoms'
 ]
 
 PROPERTY_REGISTRY = {
