@@ -725,6 +725,7 @@ Examples:
     parser.add_argument("--output-dir", default=None, help="Output directory (default: evaluation/results/ZINC/)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--smiles-col", default="smiles", help="SMILES column name in CSV")
+    parser.add_argument("--guide-scale", type=float, default=None, help="Classifier-free guidance scale (default: use model's default, typically 2.0)")
     
     args = parser.parse_args()
     
@@ -746,6 +747,11 @@ Examples:
         device=args.device,
         scattering_path=str(Path(args.test_dir) / "scattering_moments.npy"),
     )
+    
+    # Set guide scale if specified
+    if args.guide_scale is not None:
+        print(f"Setting guide_scale to {args.guide_scale}")
+        model.guide_scale = args.guide_scale
     
     # Generate molecules
     if args.unconditional:
