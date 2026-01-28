@@ -162,8 +162,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         moment_noise_cfg = aug_cfg.get('moment_noise', {})
 
        
-        print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
-        print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
+        # print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
+        # print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
 
         
         denoiser = ScatteringDenoiser(
