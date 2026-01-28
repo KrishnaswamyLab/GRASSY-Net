@@ -529,20 +529,33 @@ def compute_novelty(smiles_list: List[str], reference_smiles: List[str]) -> Dict
     }
 
 
-def compute_coverage(smiles_list: List[str]) -> Dict:
-    """Compute atom type coverage."""
+def compute_coverage(smiles_list: List[str], reference_smiles: List[str] = None) -> Dict:
+    """Compute atom type coverage against reference dataset atoms."""
+    # Get reference atoms from dataset or use default
+    if reference_smiles:
+        ref_atoms = set()
+        for smi in reference_smiles:
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                for atom in mol.GetAtoms():
+                    ref_atoms.add(atom.GetSymbol())
+        reference_atoms = sorted(list(ref_atoms))
+    else:
+        reference_atoms = REFERENCE_ATOM_TYPES
+    
     found_atoms = set()
     for mol in get_valid_mols(smiles_list):
         for atom in mol.GetAtoms():
             symbol = atom.GetSymbol()
-            if symbol in REFERENCE_ATOM_TYPES:
+            if symbol in reference_atoms:
                 found_atoms.add(symbol)
     
     return {
-        "coverage": f"{len(found_atoms)}/{len(REFERENCE_ATOM_TYPES)}",
+        "coverage": f"{len(found_atoms)}/{len(reference_atoms)}",
         "coverage_count": len(found_atoms),
         "found_atoms": sorted(list(found_atoms)),
-        "missing_atoms": sorted(list(set(REFERENCE_ATOM_TYPES) - found_atoms)),
+        "missing_atoms": sorted(list(set(reference_atoms) - found_atoms)),
+        "reference_atoms": reference_atoms,
     }
 
 
@@ -622,7 +635,7 @@ def compute_all_metrics(generated_smiles: List[str], reference_smiles: List[str]
     metrics.update(compute_novelty(generated_smiles, reference_smiles))
     
     print("  Coverage...")
-    coverage = compute_coverage(generated_smiles)
+    coverage = compute_coverage(generated_smiles, reference_smiles)
     metrics["coverage"] = coverage["coverage"]
     metrics["coverage_details"] = coverage
     
