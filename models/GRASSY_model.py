@@ -42,16 +42,17 @@ class GRASSY(pl.LightningModule):
 
         # property prediction (dynamic output size based on num_properties)
         self.num_properties = getattr(self.hparams, 'num_properties', 10)  # default to 10 for backward compatibility
+        self.num_atom_classes = getattr(self.hparams, 'num_atom_classes', 38)  # number of unique atom counts
 
         # Main regression head (all properties except num_atoms)
         self.regfc1 = nn.Linear(self.bottle_dim, 20)
         self.regbn1 = nn.BatchNorm1d(20)
         self.regfc2 = nn.Linear(20, self.num_properties - 1)  # All properties except num_atoms
 
-        # Separate regression head for num_atoms
-        self.atomregfc1 = nn.Linear(self.bottle_dim, 20)
-        self.atomregbn1 = nn.BatchNorm1d(20)
-        self.atomregfc2 = nn.Linear(20, 1)  # Predict num_atoms as regression
+        # Separate classification head for num_atoms
+        self.atomclsfc1 = nn.Linear(self.bottle_dim, 20)
+        self.atomclsbn1 = nn.BatchNorm1d(20)
+        self.atomclsfc2 = nn.Linear(20, self.num_atom_classes)  # Predict num_atoms as classification
 
         self.loss_list = []
         self.recon_loss_list = []
@@ -105,14 +106,16 @@ class GRASSY(pl.LightningModule):
         h = self.regbn1(h)
         h = F.gelu(h)
         y_pred = self.regfc2(h)
-        # Separate regression head for num_atoms
-        h_atom = self.atomregfc1(z)
-        h_atom = self.atomregbn1(h_atom)
+        # Separate classification head for num_atoms
+        h_atom = self.atomclsfc1(z)
+        h_atom = self.atomclsbn1(h_atom)
         h_atom = F.gelu(h_atom)
-        num_atoms_pred = self.atomregfc2(h_atom)
-        # Concatenate outputs: [regression_props..., num_atoms]
-        y_full = torch.cat([y_pred, num_atoms_pred], dim=1)
-        return y_full, y_pred, num_atoms_pred
+        num_atoms_logits = self.atomclsfc2(h_atom)  # [batch, num_atom_classes]
+        # Get predicted class
+        num_atoms_class = torch.argmax(num_atoms_logits, dim=1, keepdim=True).float()  # [batch, 1]
+        # Concatenate outputs: [regression_props..., num_atoms_class]
+        y_full = torch.cat([y_pred, num_atoms_class], dim=1)
+        return y_full, y_pred, num_atoms_logits
     
     def predict_from_data(self,x):
 
@@ -124,24 +127,26 @@ class GRASSY(pl.LightningModule):
         # encoding
         z, mu, logvar = self.embed(x)
         # predict
-        y_full, y_pred, num_atoms_pred = self.predict(z)
+        y_full, y_pred, num_atoms_logits = self.predict(z)
         # recon
         x_hat = self.decode(z)
-        return x_hat, y_full, mu, logvar, z
+        return x_hat, y_full, num_atoms_logits, mu, logvar, z
 
     def loss_multi_GRASSY(self, 
                         recon_x, x,  
                         mu, logvar,
-                        y_full, y, 
+                        y_full, y,
+                        num_atoms_logits,
                         alpha, batch_idx):
         # reconstruction loss
         recon_loss = nn.MSELoss()(recon_x.flatten(), x.flatten()) 
         # regression loss for all properties except num_atoms
         reg_loss = nn.MSELoss()(y_full[:, :-1], y[:, :-1])
-        # regression loss for num_atoms (last property)
-        atom_reg_loss = nn.MSELoss()(y_full[:, -1], y[:, -1])
+        # classification loss for num_atoms (last property)
+        num_atoms_target = y[:, -1].long()  # ground truth atom counts as class labels
+        atom_cls_loss = nn.CrossEntropyLoss()(num_atoms_logits, num_atoms_target)
         # Weighted sum
-        reg_loss = alpha * reg_loss.mean() + self.atom_loss_weight * atom_reg_loss.mean()
+        reg_loss = alpha * reg_loss.mean() + self.atom_loss_weight * atom_cls_loss
         
         num_epochs = self.hparams.n_epochs - 5
         total_batches = self.hparams.len_epoch * num_epochs
@@ -156,6 +161,7 @@ class GRASSY(pl.LightningModule):
         log_losses = {'train_loss' : total_loss.detach(), 
                     'recon_loss' : recon_loss.detach(),
                     'pred_loss' :reg_loss.detach(),
+                    'atom_loss': atom_cls_loss.detach()
                     }
         
         return total_loss, log_losses
@@ -172,40 +178,43 @@ class GRASSY(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y  = batch
         x = x.float()
-        x_hat, y_full, mu, logvar, z = self(x)
+        x_hat, y_full, num_atoms_logits, mu, logvar, z = self(x)
         loss, log_losses = self.loss_multi_GRASSY(recon_x=x_hat, x=x, mu=mu, logvar=logvar, y_full=y_full, y=y,
-                                                alpha=self.hparams.alpha, batch_idx=batch_idx)
+                                                num_atoms_logits=num_atoms_logits, alpha=self.hparams.alpha, batch_idx=batch_idx)
         # Log metrics explicitly (required for newer PyTorch Lightning)
         self.log('train_loss', log_losses['train_loss'], on_step=True, on_epoch=True)
         self.log('recon_loss', log_losses['recon_loss'], on_step=True, on_epoch=True)
         self.log('pred_loss', log_losses['pred_loss'], on_step=True, on_epoch=True)
+        self.log('atom_loss', log_losses['atom_loss'], on_step=True, on_epoch=True)
         return loss
    
     def validation_step(self, batch, batch_idx):
         x, y  = batch
         x = x.float()
-        x_hat, y_full, mu, logvar, z = self(x)
+        x_hat, y_full, num_atoms_logits, mu, logvar, z = self(x)
         # reconstruction loss
         recon_loss = nn.MSELoss()(x_hat.flatten(), x.flatten())
         # regression loss for all properties except num_atoms
         reg_loss = nn.MSELoss()(y_full[:, :-1], y[:, :-1])
-        # regression loss for num_atoms (last property)
-        atom_reg_loss = nn.MSELoss()(y_full[:, -1], y[:, -1])
+        # classification loss for num_atoms (last property)
+        num_atoms_target = y[:, -1].long()  # ground truth atom counts as class labels
+        atom_cls_loss = nn.CrossEntropyLoss()(num_atoms_logits, num_atoms_target)
         # Weighted sum
-        reg_loss = self.alpha * reg_loss.mean() + self.atom_loss_weight * atom_reg_loss.mean()
-
+        reg_loss = self.alpha * reg_loss.mean() + self.atom_loss_weight * atom_cls_loss
         total_loss = recon_loss + reg_loss
         log_losses = {'val_loss' : total_loss.detach(), 
                     'val_recon_loss' : recon_loss.detach(),
                     'val_pred_loss' :reg_loss.detach(),
+                    'val_atom_loss': atom_cls_loss.detach()
                     }
         
         # Log metrics explicitly (required for checkpoint callback to monitor)
         self.log('val_loss', total_loss, on_step=False, on_epoch=True)
         self.log('val_recon_loss', recon_loss, on_step=False, on_epoch=True)
         self.log('val_pred_loss', reg_loss, on_step=False, on_epoch=True)
+        self.log('val_atom_loss', atom_cls_loss, on_step=False, on_epoch=True)
         return log_losses
 
     def configure_optimizers(self):
 
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return torch.optim.AdamW(self.parameters(), lr=self.hparams.learning_rate)

@@ -59,6 +59,8 @@ def config_to_hparams(config: dict, input_dim: int, num_properties: int, len_epo
         alpha=config['training']['alpha'],
         atom_loss_weight=config['training'].get('atom_loss_weight', 1.0),
         num_atom_classes=config['model'].get('num_atom_classes', config['dataset'].get('num_atom_classes', 64)),
+        min_atoms=config['model'].get('min_atoms', 7),
+        max_atoms=config['model'].get('max_atoms', 19),
         n_epochs=config['training']['n_epochs'],
         len_epoch=len_epoch,
         num_properties=num_properties,

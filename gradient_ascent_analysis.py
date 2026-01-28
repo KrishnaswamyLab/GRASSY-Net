@@ -37,13 +37,13 @@ def auto_detect_files(directory):
     if os.path.exists(directory):
         for f in os.listdir(directory):
             if f.endswith('.npy'):
-                if 'ordered_embedding' in f and 'train' in f:
+                if 'ordered_embedding' in f:
                     files['embedding'] = os.path.join(directory, f)
-                elif 'embedding_prop_lists' in f and 'train' in f:
+                elif 'embedding_prop_lists' in f:
                     files['properties'] = os.path.join(directory, f)
-                elif 'scattering_coeffs' in f and 'train' in f:
+                elif 'scattering_coeffs' in f:
                     files['scattering'] = os.path.join(directory, f)
-                elif 'atom_percentages' in f and 'train' in f:
+                elif 'atom_percentages' in f:
                     files['atom_percentages'] = os.path.join(directory, f)
     return files
 
@@ -154,12 +154,11 @@ def run_gradient_ascent(model, embeddings, prop_arrays, device, n_trajectories=5
     """Run gradient ascent optimization with multiple noisy trajectories from a single starting point."""
     print(f"\nRunning gradient ascent ({n_trajectories} noisy trajectories, {n_steps} steps, noise={noise_scale})...")
     # Select single starting point (median of first property)
-    if len(prop_arrays) > 0:
-        prop_to_optimize = prop_arrays[0]
-        prop_indices = np.argsort(prop_to_optimize)
-        start_idx = prop_indices[len(prop_indices)//2]  # Median
-    else:
-        start_idx = np.random.randint(len(embeddings))
+    # Select starting point near center of latent space
+    embeddings_center = np.mean(embeddings, axis=0)
+    distances_to_center = np.linalg.norm(embeddings - embeddings_center, axis=1)
+    start_idx = np.argmin(distances_to_center)
+    # start_idx = np.random.randint(len(embeddings))
     
     print(f"  Selected starting point: index {start_idx}")
     
@@ -323,17 +322,17 @@ def main():
     parser = argparse.ArgumentParser(description='Gradient ascent analysis in latent space')
     parser.add_argument('--training_dir', type=str, required=True,
                         help='Path to training output directory')
-    parser.add_argument('--n_trajectories', type=int, default=5,
+    parser.add_argument('--n_trajectories', type=int, default=1,
                         help='Number of trajectories to compute')
-    parser.add_argument('--n_steps', type=int, default=50,
+    parser.add_argument('--n_steps', type=int, default=100,
                         help='Number of gradient ascent steps')
-    parser.add_argument('--step_size', type=float, default=1e-5,
+    parser.add_argument('--step_size', type=float, default=1e-1,
                         help='Gradient ascent step size')
     parser.add_argument('--phate_knn', type=int, default=5,
                         help='PHATE k-nearest neighbors')
     parser.add_argument('--phate_decay', type=int, default=40,
                         help='PHATE decay parameter')
-    parser.add_argument('--noise_scale', type=float, default=1,
+    parser.add_argument('--noise_scale', type=float, default=0,
                         help='Noise scale for stochastic trajectories')
     parser.add_argument('--output_dir', type=str, default='figs/',
                         help='Output directory for saving figures')

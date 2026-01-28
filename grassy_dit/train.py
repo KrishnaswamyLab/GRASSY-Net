@@ -329,7 +329,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         if scattering.dim() == 1:
             scattering = scattering.unsqueeze(0).expand(batch_size, -1).clone()
         if isinstance(num_nodes, int):
-            num_nodes = torch.full((len(scattering),), num_nodes, dtype=torch.long)
+            num_nodes = torch.full((len(scattering),), num_nodes, dtype=torch.long, device=self.device)
         
         # No scaffold - use parent directly
         if scaffold_X is None:

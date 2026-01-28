@@ -21,7 +21,7 @@ dataset:
 scattering:
   J: 4              # Number of wavelet scales
   num_moments: 4    # Statistical moments (1=mean, 2=+var, 3=+skew, 4=+kurtosis)
-  precomputed_path: "grassy_dit/data_JBCD/scattering_moments.npy"
+  precomputed_path: "grassy_dit/data/data_JBCD/scattering_moments.npy"
   # Output dimension = num_node_features * (1 + J + J*(J-1)/2) * num_moments
   # For 16 features, J=4, moments=4: 16 * 11 * 4 = 704
 
