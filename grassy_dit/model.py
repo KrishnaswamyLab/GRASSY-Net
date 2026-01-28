@@ -92,7 +92,6 @@ class ScatteringTokenizer(nn.Module):
 
     def _apply_moment_noise(self, x):
         """Apply moment noise augmentation during training."""
-        # print(f"[DEBUG] moment_noise_cfg = {self.moment_noise_cfg}", flush=True) # debug print
         cfg = self.moment_noise_cfg
         prob = cfg.get('prob', 0.0)
         if prob <= 0:
@@ -104,7 +103,6 @@ class ScatteringTokenizer(nn.Module):
         if not mask.any():
             return x
         
-        # print(f"[DEBUG] Applying moment noise to {mask.sum().item()}/{B} samples", flush=True)  # debug print
 
         noisy = x.clone()
         lower = max(1, int(cfg.get('lower_scalar', 0.25) * total))
@@ -133,7 +131,6 @@ class ScatteringTokenizer(nn.Module):
         if force_null:
             return self.null.expand(B, -1, -1)
 
-        # print(f"[DEBUG forward] train={train}, moment_noise_cfg={self.moment_noise_cfg}", flush=True) # debug print
 
         # Apply moment noise during training
         if train and self.moment_noise_cfg:
