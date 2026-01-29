@@ -216,6 +216,7 @@ def reconstruction_eval(
     1. Generate `attempts` molecules conditioned on its scattering
     2. Generate `attempts` molecules unconditionally (same num_atoms)
     3. Check if any generation exactly matches the reference
+    4. Compute max Tanimoto similarity to reference (even if not exact match)
     """
     print(f"\nRunning reconstruction eval on {num_molecules} molecules ({attempts} attempts each)...")
     
@@ -225,6 +226,8 @@ def reconstruction_eval(
         "with_moments": 0,
         "without_moments": 0,
         "total": 0,
+        "similarities_with": [],  # Max similarity per molecule (with moments)
+        "similarities_without": [],  # Max similarity per molecule (without moments)
     }
     
     original_guide_scale = getattr(model, "guide_scale", 2.0)
@@ -236,6 +239,7 @@ def reconstruction_eval(
             continue
         
         ref_canon = Chem.MolToSmiles(ref_mol)
+        ref_fp = AllChem.GetMorganFingerprintAsBitVect(ref_mol, 2, nBits=2048)
         num_atoms = ref_mol.GetNumAtoms()
         results["total"] += 1
         
@@ -256,8 +260,23 @@ def reconstruction_eval(
             num_nodes=num_nodes_tensor,
             batch_size=attempts,
         )
-        if any(canonicalize(s) == ref_canon for s in gen_with if s):
+        
+        # Compute max similarity for with_moments and check exact match
+        max_sim_with = 0.0
+        exact_match_with = False
+        for s in gen_with:
+            if s:
+                mol = Chem.MolFromSmiles(s)
+                if mol:
+                    gen_canon = Chem.MolToSmiles(mol)
+                    if gen_canon == ref_canon:
+                        exact_match_with = True
+                    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                    sim = DataStructs.TanimotoSimilarity(ref_fp, fp)
+                    max_sim_with = max(max_sim_with, sim)
+        if exact_match_with:
             results["with_moments"] += 1
+        results["similarities_with"].append(max_sim_with)
         
         # Without moments (unconditional)
         model.guide_scale = 0.0
@@ -266,12 +285,30 @@ def reconstruction_eval(
             num_nodes=num_nodes_tensor,
             batch_size=attempts,
         )
-        if any(canonicalize(s) == ref_canon for s in gen_without if s):
+        
+        # Compute max similarity for without_moments and check exact match
+        max_sim_without = 0.0
+        exact_match_without = False
+        for s in gen_without:
+            if s:
+                mol = Chem.MolFromSmiles(s)
+                if mol:
+                    gen_canon = Chem.MolToSmiles(mol)
+                    if gen_canon == ref_canon:
+                        exact_match_without = True
+                    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                    sim = DataStructs.TanimotoSimilarity(ref_fp, fp)
+                    max_sim_without = max(max_sim_without, sim)
+        if exact_match_without:
             results["without_moments"] += 1
+        results["similarities_without"].append(max_sim_without)
     
     model.guide_scale = original_guide_scale
     
     total = results["total"]
+    avg_sim_with = np.mean(results["similarities_with"]) if results["similarities_with"] else 0.0
+    avg_sim_without = np.mean(results["similarities_without"]) if results["similarities_without"] else 0.0
+    
     return {
         "num_molecules": total,
         "attempts_per_molecule": attempts,
@@ -279,6 +316,8 @@ def reconstruction_eval(
         "without_moments_count": results["without_moments"],
         "with_moments_rate": results["with_moments"] / total if total > 0 else 0,
         "without_moments_rate": results["without_moments"] / total if total > 0 else 0,
+        "avg_similarity_with_moments": float(avg_sim_with),
+        "avg_similarity_without_moments": float(avg_sim_without),
     }
 
 
@@ -299,12 +338,15 @@ def scaffold_reconstruction_eval_single(
     2. Generate with scaffold constraint + scattering moments
     3. Generate with scaffold constraint but NO moments (unconditional)
     4. Check if any generation exactly matches the reference
+    5. Compute max Tanimoto similarity to reference
     """
     results = {
         "with_moments": 0,
         "without_moments": 0,
         "total": 0,
         "skipped": 0,
+        "similarities_with": [],
+        "similarities_without": [],
     }
     
     original_guide_scale = getattr(model, "guide_scale", 2.0)
@@ -327,6 +369,7 @@ def scaffold_reconstruction_eval_single(
         remove_indices = [int(i * num_atoms / (num_atoms_to_remove + 1)) for i in range(1, num_atoms_to_remove + 1)]
         
         ref_canon = Chem.MolToSmiles(ref_mol)
+        ref_fp = AllChem.GetMorganFingerprintAsBitVect(ref_mol, 2, nBits=2048)
         results["total"] += 1
         
         # Prepare scaffold tensors
@@ -370,8 +413,23 @@ def scaffold_reconstruction_eval_single(
             scaffold_E=scaffold_E_batch,
             scaffold_node_mask=scaffold_mask_batch,
         )
-        if any(canonicalize(s) == ref_canon for s in gen_with if s):
+        
+        # Compute max similarity for with_moments and check exact match
+        max_sim_with = 0.0
+        exact_match_with = False
+        for s in gen_with:
+            if s:
+                mol = Chem.MolFromSmiles(s)
+                if mol:
+                    gen_canon = Chem.MolToSmiles(mol)
+                    if gen_canon == ref_canon:
+                        exact_match_with = True
+                    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                    sim = DataStructs.TanimotoSimilarity(ref_fp, fp)
+                    max_sim_with = max(max_sim_with, sim)
+        if exact_match_with:
             results["with_moments"] += 1
+        results["similarities_with"].append(max_sim_with)
         
         # Without moments (unconditional) + scaffold
         model.guide_scale = 0.0
@@ -383,12 +441,30 @@ def scaffold_reconstruction_eval_single(
             scaffold_E=scaffold_E_batch,
             scaffold_node_mask=scaffold_mask_batch,
         )
-        if any(canonicalize(s) == ref_canon for s in gen_without if s):
+        
+        # Compute max similarity for without_moments and check exact match
+        max_sim_without = 0.0
+        exact_match_without = False
+        for s in gen_without:
+            if s:
+                mol = Chem.MolFromSmiles(s)
+                if mol:
+                    gen_canon = Chem.MolToSmiles(mol)
+                    if gen_canon == ref_canon:
+                        exact_match_without = True
+                    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                    sim = DataStructs.TanimotoSimilarity(ref_fp, fp)
+                    max_sim_without = max(max_sim_without, sim)
+        if exact_match_without:
             results["without_moments"] += 1
+        results["similarities_without"].append(max_sim_without)
     
     model.guide_scale = original_guide_scale
     
     total = results["total"]
+    avg_sim_with = np.mean(results["similarities_with"]) if results["similarities_with"] else 0.0
+    avg_sim_without = np.mean(results["similarities_without"]) if results["similarities_without"] else 0.0
+    
     return {
         "num_atoms_removed": num_atoms_to_remove,
         "num_molecules": total,
@@ -397,6 +473,8 @@ def scaffold_reconstruction_eval_single(
         "without_moments_count": results["without_moments"],
         "with_moments_rate": results["with_moments"] / total if total > 0 else 0,
         "without_moments_rate": results["without_moments"] / total if total > 0 else 0,
+        "avg_similarity_with_moments": float(avg_sim_with),
+        "avg_similarity_without_moments": float(avg_sim_without),
     }
 
 
@@ -444,8 +522,8 @@ def scaffold_reconstruction_eval(
             mol_indices, attempts, device, num_remove
         )
         per_removal_results[num_remove] = result
-        print(f"    With moments:    {result['with_moments_rate']:.1%} ({result['with_moments_count']}/{result['num_molecules']})")
-        print(f"    Without moments: {result['without_moments_rate']:.1%} ({result['without_moments_count']}/{result['num_molecules']})")
+        print(f"    With moments:    {result['with_moments_rate']:.1%} ({result['with_moments_count']}/{result['num_molecules']}) | Avg sim: {result['avg_similarity_with_moments']:.4f}")
+        print(f"    Without moments: {result['without_moments_rate']:.1%} ({result['without_moments_count']}/{result['num_molecules']}) | Avg sim: {result['avg_similarity_without_moments']:.4f}")
     
     return {
         "num_molecules_requested": num_molecules,
@@ -791,6 +869,8 @@ Examples:
         print(f"\nPure Reconstruction results:")
         print(f"  With moments:    {recon_results['with_moments_rate']:.2%} ({recon_results['with_moments_count']}/{recon_results['num_molecules']})")
         print(f"  Without moments: {recon_results['without_moments_rate']:.2%} ({recon_results['without_moments_count']}/{recon_results['num_molecules']})")
+        print(f"  Avg similarity (with moments):    {recon_results['avg_similarity_with_moments']:.4f}")
+        print(f"  Avg similarity (without moments): {recon_results['avg_similarity_without_moments']:.4f}")
     
     # Scaffold reconstruction evaluation (optional)
     scaffold_recon_results = None
@@ -802,8 +882,8 @@ Examples:
             removal_counts=removal_counts,
         )
         print(f"\nScaffold Reconstruction Summary:")
-        print(f"  {'Atoms Removed':<15} {'With Moments':<20} {'Without Moments':<20}")
-        print(f"  {'-'*55}")
+        print(f"  {'Atoms Removed':<15} {'With Moments':<25} {'Without Moments':<25} {'Sim (w/)':<10} {'Sim (w/o)':<10}")
+        print(f"  {'-'*85}")
         for num_remove in removal_counts:
             r = scaffold_recon_results['per_removal_results'].get(num_remove, {})
             with_rate = r.get('with_moments_rate', 0)
@@ -811,7 +891,11 @@ Examples:
             with_count = r.get('with_moments_count', 0)
             without_count = r.get('without_moments_count', 0)
             total = r.get('num_molecules', 0)
-            print(f"  {num_remove:<15} {with_rate:.1%} ({with_count}/{total})      {without_rate:.1%} ({without_count}/{total})")
+            sim_with = r.get('avg_similarity_with_moments', 0)
+            sim_without = r.get('avg_similarity_without_moments', 0)
+            with_str = f"{with_rate:.1%} ({with_count}/{total})"
+            without_str = f"{without_rate:.1%} ({without_count}/{total})"
+            print(f"  {num_remove:<15} {with_str:<25} {without_str:<25} {sim_with:.4f}    {sim_without:.4f}")
     
     # Print results
     print(f"\n{'='*60}")
