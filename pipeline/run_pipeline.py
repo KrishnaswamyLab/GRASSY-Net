@@ -164,6 +164,20 @@ Examples:
         help='Gaussian noise standard deviation (default: 0.2)',
     )
     
+    # Multi-phase training
+    parser.add_argument(
+        '--phase-epochs',
+        type=str,
+        default=None,
+        help='Multi-phase training epochs, comma-separated (e.g., "1000,500,500")',
+    )
+    parser.add_argument(
+        '--phase-lrs',
+        type=str,
+        default=None,
+        help='Multi-phase learning rates, comma-separated (e.g., "2e-4,1e-4,5e-5")',
+    )
+    
     # Tokenization options
     parser.add_argument(
         '--moment-tokens',
@@ -508,6 +522,8 @@ def run_pipeline(config: PipelineConfig) -> dict:
                 wandb_project=config.logging.wandb.project,
                 wandb_entity=config.logging.wandb.entity,
                 use_moment_tokens=config.dit.use_moment_tokens,
+                phase_epochs=config.dit.phase_epochs,
+                phase_lrs=config.dit.phase_lrs,
             )
             
             ckpt_manager.register_stage_complete(

@@ -81,6 +81,9 @@ class DiTConfig:
     noise_upper: float = 1.0  # Max fraction of moments to corrupt
     # Tokenization options
     use_moment_tokens: bool = False  # Add moment tokens (mean/var/skew/kurt) to tokenization
+    # Multi-phase training (optional)
+    phase_epochs: Optional[str] = None  # e.g. "1000,500,500" for Stage1,Stage2,Stage3
+    phase_lrs: Optional[str] = None     # e.g. "2e-4,1e-4,5e-5" learning rates per phase
 
 
 @dataclass
@@ -285,6 +288,10 @@ def merge_cli_args(config: PipelineConfig, args) -> PipelineConfig:
         config.dit.noise_std = args.noise_std
     if hasattr(args, 'moment_tokens') and args.moment_tokens:
         config.dit.use_moment_tokens = True
+    if hasattr(args, 'phase_epochs') and args.phase_epochs is not None:
+        config.dit.phase_epochs = args.phase_epochs
+    if hasattr(args, 'phase_lrs') and args.phase_lrs is not None:
+        config.dit.phase_lrs = args.phase_lrs
     
     # Hardware
     if hasattr(args, 'device') and args.device:

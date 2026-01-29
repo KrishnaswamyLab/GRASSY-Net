@@ -46,6 +46,9 @@ def run_train_dit(
     wandb_project: str = "GRASSY-Pipeline",
     wandb_entity: str = "grassy",
     use_moment_tokens: bool = False,
+    # Multi-phase training (optional)
+    phase_epochs: Optional[str] = None,  # e.g. "1000,500,500"
+    phase_lrs: Optional[str] = None,     # e.g. "2e-4,1e-4,5e-5"
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Run DiT training stage.
@@ -170,6 +173,8 @@ def run_train_dit(
             'epochs': epochs,
             'batch_size': batch_size,
             'learning_rate': learning_rate,
+            'phase_epochs': phase_epochs,  # Multi-phase: e.g. "1000,500,500"
+            'phase_lrs': phase_lrs,        # Multi-phase: e.g. "2e-4,1e-4,5e-5"
         },
         'checkpoint': {
             'save_dir': output_dir,

@@ -161,10 +161,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         aug_cfg = self.config.get('augmentation', {})
         moment_noise_cfg = aug_cfg.get('moment_noise', {})
 
-       
-        # print(f"[DEBUG train.py] augmentation config: {aug_cfg}", flush=True) # debug
-        # print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
-
+        # Two-stage training config
+        training_stage = model_cfg.get('training_stage', 1)
+        stage1_checkpoint = model_cfg.get('stage1_checkpoint', None)
         
         # Check for moment tokens config
         use_moment_tokens = model_cfg.get('use_moment_tokens', False)
@@ -182,12 +181,24 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             device=self.device,
             moment_noise_cfg=moment_noise_cfg,
             use_moment_tokens=use_moment_tokens,
+            training_stage=training_stage,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser
         ).to(self.device)
         
-        if checkpoint is not None:
+        # Handle checkpoint loading based on training stage
+        if training_stage == 2:
+            # Stage 2: Load Stage 1 checkpoint and freeze base model
+            if stage1_checkpoint is None:
+                raise ValueError("Stage 2 training requires 'stage1_checkpoint' path in model config")
+            print(f"\n=== STAGE 2 TRAINING ===")
+            print(f"Loading Stage 1 checkpoint: {stage1_checkpoint}")
+            stage1_ckpt = torch.load(stage1_checkpoint, map_location=self.device)
+            self.model.load_state_dict(stage1_ckpt["model_state_dict"])
+            self.model.denoiser.freeze_for_stage2()
+        elif checkpoint is not None:
+            # Stage 1 with resume, or regular training
             self.model.load_state_dict(checkpoint["model_state_dict"])
         
         return self.model
@@ -301,13 +312,22 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
 
     def fit(self, X_train, y_train, X_val=None, y_val=None, val_every_n_epochs=1, **kwargs):
-        """Override fit to add validation and Wandb logging."""
+        """Override fit to add validation, Wandb logging, and multi-phase training."""
         # Store validation data for use in _train_epoch
         self._val_smiles = X_val
         self._val_scattering = y_val
         self._val_every_n_epochs = val_every_n_epochs
         
-        # Call parent fit which will trigger _validate_inputs and _initialize_model
+        # Check for multi-phase training config
+        training_cfg = self.config.get('training', {})
+        phase_epochs = training_cfg.get('phase_epochs', None)
+        phase_lrs = training_cfg.get('phase_lrs', None)
+        
+        if phase_epochs is not None:
+            # Multi-phase training mode
+            return self._fit_phased(X_train, y_train, X_val, y_val, phase_epochs, phase_lrs, **kwargs)
+        
+        # Standard single-phase training
         result = super().fit(X_train=X_train, y_train=y_train, **kwargs)
             
         # Log hyperparameters
@@ -321,6 +341,134 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             })
         
         return result
+
+    def _fit_phased(self, X_train, y_train, X_val, y_val, phase_epochs, phase_lrs, **kwargs):
+        """
+        Multi-phase training: Stage 1 → Stage 2 → Stage 3.
+        
+        Args:
+            phase_epochs: list/str of epochs per phase, e.g. [1000, 500, 500] or "1000,500,500"
+            phase_lrs: list/str of learning rates per phase, e.g. [2e-4, 1e-4, 5e-5] or "2e-4,1e-4,5e-5"
+        """
+        # Parse phase configs
+        if isinstance(phase_epochs, str):
+            phase_epochs = [int(x.strip()) for x in phase_epochs.split(',')]
+        if isinstance(phase_lrs, str):
+            phase_lrs = [float(x.strip()) for x in phase_lrs.split(',')]
+        
+        num_phases = len(phase_epochs)
+        if phase_lrs is None:
+            phase_lrs = [self.learning_rate] * num_phases
+        
+        assert len(phase_lrs) == num_phases, f"phase_lrs ({len(phase_lrs)}) must match phase_epochs ({num_phases})"
+        
+        print(f"\n{'='*60}")
+        print(f"MULTI-PHASE TRAINING: {num_phases} phases")
+        print(f"  Phase epochs: {phase_epochs}")
+        print(f"  Phase LRs: {phase_lrs}")
+        print(f"{'='*60}\n")
+        
+        # First, prepare the data (triggers _validate_inputs)
+        X_train, y_train = self._validate_inputs(X_train, y_train)
+        
+        # Prepare dataloader
+        train_smiles = X_train
+        train_scattering = y_train
+        train_data = self._process_data(train_smiles, train_scattering)
+        train_loader = DataLoader(
+            train_data, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            num_workers=4,
+            pin_memory=True,
+            collate_fn=self._collate_batch,
+        )
+        
+        # Initialize model for Stage 1 (unconditional)
+        self.config['model']['training_stage'] = 1
+        self._initialize_model(None)
+        
+        # Log hyperparameters once
+        if hasattr(self, 'num_atom_types') and wandb.run is not None:
+            wandb.config.update({
+                "num_atom_types": self.num_atom_types,
+                "num_levels": self.num_levels,
+                "num_moments": self.num_moments,
+                "scattering_dim": self.num_atom_types * self.num_levels * self.num_moments,
+                "val_size": len(X_val) if X_val is not None else 0,
+                "phase_epochs": phase_epochs,
+                "phase_lrs": phase_lrs,
+            })
+        
+        global_epoch = 0
+        
+        for phase_idx, (epochs, lr) in enumerate(zip(phase_epochs, phase_lrs)):
+            phase_num = phase_idx + 1
+            print(f"\n{'='*60}")
+            print(f"PHASE {phase_num}/{num_phases}: {epochs} epochs, LR={lr}")
+            print(f"{'='*60}")
+            
+            # Configure phase
+            if phase_num == 1:
+                # Stage 1: unconditional (skip cross-attention)
+                print("Stage 1: Unconditional training (cross-attention SKIPPED)")
+                self.model.denoiser.training_stage = 1
+            elif phase_num == 2:
+                # Stage 2: freeze base, train cross-attention only
+                print("Stage 2: Cross-attention training (base model FROZEN)")
+                self.model.denoiser.freeze_for_stage2()
+            else:
+                # Stage 3+: unfreeze all
+                print(f"Stage {phase_num}: Full fine-tuning (all params TRAINABLE)")
+                self.model.denoiser.unfreeze_all()
+            
+            # Create optimizer with phase-specific LR
+            optimizer = torch.optim.AdamW(
+                filter(lambda p: p.requires_grad, self.model.parameters()),
+                lr=lr,
+                weight_decay=0.01,
+            )
+            
+            # Train for this phase
+            self._best_loss = float('inf')  # Reset best loss for each phase
+            for epoch in range(epochs):
+                losses = self._train_epoch(train_loader, optimizer, global_epoch)
+                global_epoch += 1
+                
+                # Log phase info
+                if wandb.run is not None:
+                    wandb.log({
+                        "phase": phase_num,
+                        "phase_epoch": epoch,
+                        "learning_rate": lr,
+                    }, step=global_epoch)
+            
+            # Save phase checkpoint
+            phase_checkpoint_path = os.path.join(
+                self.checkpoint_dir, f"phase{phase_num}_epoch{global_epoch}.pt"
+            )
+            self._save_checkpoint(phase_checkpoint_path, global_epoch, self._best_loss)
+            print(f"Phase {phase_num} complete. Checkpoint: {phase_checkpoint_path}")
+        
+        print(f"\n{'='*60}")
+        print(f"MULTI-PHASE TRAINING COMPLETE")
+        print(f"Total epochs: {global_epoch}")
+        print(f"{'='*60}\n")
+        
+        self._is_fitted = True
+        return self
+
+    def _save_checkpoint(self, path, epoch, loss):
+        """Save a checkpoint to the specified path."""
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "loss": loss,
+            "config": self.config,
+        }
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(checkpoint, path)
+        print(f"Checkpoint saved: {path}")
     
     @torch.no_grad()
     def generate(self, scattering, num_nodes=None, batch_size=1,
