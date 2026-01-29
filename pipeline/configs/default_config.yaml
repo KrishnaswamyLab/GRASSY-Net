@@ -1,0 +1,121 @@
+# GRASSY-Net Pipeline Configuration
+# ==================================
+#
+# This is the default configuration template for the end-to-end pipeline.
+# CLI arguments override these values.
+#
+# Usage:
+#   python -m pipeline.run_pipeline --config pipeline/configs/default_config.yaml --input data.smi
+#   python -m pipeline.run_pipeline --input data.smi  # Uses defaults + CLI args
+
+# Experiment metadata
+experiment:
+  name: "experiment"
+  output_dir: null  # Auto-generated as runs/{name}_{timestamp} if null
+
+# Dataset configuration
+dataset:
+  input_file: ""  # Required: path to input .smi file (set via --input)
+  max_molecules: null  # Limit molecules (null = use all)
+
+# Data splitting configuration
+# ---------------------------
+# NOTE: seed is ONLY used for splitting - ensures reproducible train/val/test sets
+# Training and generation are stochastic by design (no seed)
+splitting:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42  # Deterministic splitting seed
+
+# Scattering transform configuration
+scattering:
+  J: 4              # Number of wavelet scales
+  num_moments: 4    # Statistical moments (mean, var, skew, kurtosis)
+
+# GRASSY autoencoder configuration
+# --------------------------------
+# checkpoint: Provide existing checkpoint path to skip training (with epochs=0)
+#             or to resume training (with epochs > 0)
+# epochs: Number of training epochs (0 = skip training, use checkpoint as-is)
+grassy:
+  checkpoint: null  # Path to existing checkpoint (optional)
+  epochs: 100       # Training epochs (0 = skip if checkpoint provided)
+  bottle_dim: 32    # Latent space dimension
+  hidden_dim: 128   # Hidden layer dimension
+  batch_size: 64
+  learning_rate: 0.001
+  alpha: 0.01       # Regression loss weight
+
+# DiT (Diffusion Transformer) configuration
+# -----------------------------------------
+# checkpoint: Provide existing checkpoint path to skip training (with epochs=0)
+#             or to resume training (with epochs > 0)
+# epochs: Number of training epochs (0 = skip training, use checkpoint as-is)
+dit:
+  checkpoint: null  # Path to existing checkpoint (optional)
+  epochs: 2000      # Training epochs (0 = skip if checkpoint provided)
+  hidden_size: 1024 # Transformer hidden dimension
+  num_layer: 6      # Number of transformer layers
+  num_head: 16      # Number of attention heads
+  batch_size: 64
+  learning_rate: 2e-4
+  # Moment noise augmentation (training robustness)
+  noise_prob: 0.2   # Probability of adding noise to a sample
+  noise_std: 0.2    # Gaussian noise standard deviation
+  noise_lower: 0.25 # Min fraction of moments to corrupt
+  noise_upper: 1.0  # Max fraction of moments to corrupt
+
+# Evaluation configuration
+evaluation:
+  num_samples: 1000   # Molecules to generate for evaluation
+  batch_size: 64      # Generation batch size
+  recon_samples: 50   # Molecules for reconstruction test
+  recon_attempts: 10  # Attempts per molecule
+  guide_scale: 2.0    # Classifier-free guidance scale
+
+# Hardware configuration
+hardware:
+  device: "auto"  # "auto", "cuda", "cpu"
+  num_workers: 4
+
+# Logging configuration
+logging:
+  wandb:
+    enabled: false        # Enable Weights & Biases logging
+    project: "GRASSY-Pipeline"
+    entity: "grassy"
+
+
+# ============================================================================
+# CHECKPOINT INJECTION BEHAVIOR
+# ============================================================================
+#
+# The pipeline supports three modes for each training stage (GRASSY and DiT):
+#
+# | Checkpoint | Epochs | Behavior                                        |
+# |------------|--------|--------------------------------------------------|
+# | None       | > 0    | Train from scratch for N epochs                  |
+# | Provided   | > 0    | Resume training from checkpoint for N more epochs|
+# | Provided   | 0      | SKIP training, use checkpoint as-is in evaluation|
+# | None       | 0      | ERROR: Cannot skip without a checkpoint          |
+#
+# Examples:
+#
+#   # Train everything from scratch
+#   python -m pipeline.run_pipeline --input data.smi
+#
+#   # Use existing DiT, skip DiT training, run evaluation only
+#   python -m pipeline.run_pipeline --input data.smi \
+#       --dit-checkpoint checkpoints/model.pt --dit-epochs 0
+#
+#   # Resume DiT training for 500 more epochs
+#   python -m pipeline.run_pipeline --input data.smi \
+#       --dit-checkpoint checkpoints/model.pt --dit-epochs 500
+#
+#   # Use both checkpoints, skip all training, just evaluate
+#   python -m pipeline.run_pipeline --input data.smi \
+#       --grassy-checkpoint path/to/grassy.ckpt --grassy-epochs 0 \
+#       --dit-checkpoint path/to/dit.pt --dit-epochs 0
+#
+# ============================================================================
