@@ -70,6 +70,8 @@ class CheckpointManager:
         "train_grassy",
         "train_dit",
         "evaluate",
+        "sample_unconstrained",
+        "sample_property_opt",
     ]
     
     def __init__(self, output_dir: str, run_id: Optional[str] = None):

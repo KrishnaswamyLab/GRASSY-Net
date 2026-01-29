@@ -166,6 +166,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         # print(f"[DEBUG train.py] moment_noise_cfg: {moment_noise_cfg}", flush=True)# debug 
 
         
+        # Check for moment tokens config
+        use_moment_tokens = model_cfg.get('use_moment_tokens', False)
+        
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
             hidden_size=self.hidden_size,
@@ -177,7 +180,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_levels=getattr(self, 'num_levels', 11),
             num_moments=getattr(self, 'num_moments', 4),
             device=self.device,
-            moment_noise_cfg=moment_noise_cfg
+            moment_noise_cfg=moment_noise_cfg,
+            use_moment_tokens=use_moment_tokens,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser

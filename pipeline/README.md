@@ -4,7 +4,7 @@ A unified pipeline that automates the complete GRASSY-Net workflow: from raw SMI
 
 ## Overview
 
-The pipeline orchestrates 6 stages:
+The pipeline orchestrates up to 8 stages:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -15,10 +15,22 @@ The pipeline orchestrates 6 stages:
          ┌────────────────────────────────────────────┘
          ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Train GRASSY   │ -> │  Train DiT      │ -> │  Evaluate       │
-│  (Autoencoder)  │    │  (Diffusion)    │    │  (Metrics/Report)│
+│  Train GRASSY   │ -> │  Train DiT      │ -> │  Conditional    │
+│  (Autoencoder)  │    │  (Diffusion)    │    │  Evaluation     │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
+                                                      │
+         ┌────────────────────────────────────────────┘
+         ▼ (Optional)
+┌─────────────────┐    ┌─────────────────┐
+│  Unconstrained  │    │  Property       │
+│  Sampling       │    │  Optimization   │
+└─────────────────┘    └─────────────────┘
 ```
+
+**Evaluation modes:**
+- **Conditional (default):** Generate molecules conditioned on test set scattering
+- **Unconstrained:** Generate from prior N(0,I) in latent space (Table 1 metrics)
+- **Property Optimization:** Optimize molecules toward target properties
 
 ## Quick Start
 
@@ -84,6 +96,24 @@ python -m pipeline.run_pipeline --input data.smi \
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--num-samples` | 1000 | Molecules to generate for evaluation |
+| `--eval-conditional` | on | Run conditional generation evaluation |
+| `--no-eval-conditional` | - | Skip conditional evaluation |
+| `--eval-unconstrained` | off | Run unconstrained prior sampling |
+| `--eval-property-opt` | off | Run property optimization |
+
+### Unconstrained Sampling
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--unconstrained-samples` | 1000 | Number of samples from prior |
+
+### Property Optimization
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--property-target` | qed | Target: `qed`, `logp`, `sa`, `mw`, or `0-2` |
+| `--property-trajectories` | 10 | Number of optimization trajectories |
+| `--property-steps` | 50 | Optimization steps per trajectory |
 
 ### Hardware & Logging
 
@@ -147,6 +177,13 @@ evaluation:
   num_samples: 1000
   batch_size: 64
   guide_scale: 2.0
+  run_conditional: true
+  run_unconstrained: false
+  run_property_opt: false
+  unconstrained_samples: 1000
+  property_target: "qed"
+  property_trajectories: 10
+  property_steps: 50
 
 hardware:
   device: "auto"
@@ -206,7 +243,35 @@ python -m pipeline.run_pipeline \
     --num-samples 5000
 ```
 
-### 4. Custom Split for Cross-Validation
+### 4. Full Evaluation Suite (All Modes)
+
+```bash
+python -m pipeline.run_pipeline \
+    --input datasets/ZINC_tranches/BBAB/BBAB.smi \
+    --grassy-checkpoint outputs/grassy.ckpt \
+    --grassy-epochs 0 \
+    --dit-checkpoint outputs/dit.pt \
+    --dit-epochs 0 \
+    --eval-unconstrained \
+    --unconstrained-samples 5000 \
+    --eval-property-opt \
+    --property-target qed \
+    --property-trajectories 20
+```
+
+### 5. Unconstrained Sampling Only (Table 1 Metrics)
+
+```bash
+python -m pipeline.run_pipeline \
+    --input data.smi \
+    --grassy-checkpoint grassy.ckpt --grassy-epochs 0 \
+    --dit-checkpoint dit.pt --dit-epochs 0 \
+    --no-eval-conditional \
+    --eval-unconstrained \
+    --unconstrained-samples 10000
+```
+
+### 6. Custom Split for Cross-Validation
 
 ```bash
 # Run 1 - seed 42
@@ -216,7 +281,7 @@ python -m pipeline.run_pipeline --input data.smi --split-seed 42 --output-dir ru
 python -m pipeline.run_pipeline --input data.smi --split-seed 123 --output-dir runs/cv_fold2
 ```
 
-### 5. Quick Test Run
+### 7. Quick Test Run
 
 ```bash
 python -m pipeline.run_pipeline \
@@ -255,10 +320,17 @@ runs/bbab_experiment_20260129/
 │   ├── model.pt
 │   └── dit_config.yaml
 │
-└── evaluate/                 # Stage 6: Evaluation results
-    ├── generated_molecules.csv
-    ├── metrics.json
-    └── plots/
+├── evaluate/                 # Stage 6: Conditional evaluation
+│   ├── generated_samples_*.txt
+│   └── evaluation_results_*.json
+│
+├── sample_unconstrained/     # Stage 7: Unconstrained (optional)
+│   ├── unconstrained_samples_*.txt
+│   └── unconstrained_metrics_*.json
+│
+└── sample_property_opt/      # Stage 8: Property opt (optional)
+    ├── property_opt_samples_*.txt
+    └── property_opt_metrics_*.json
 ```
 
 ## Checkpoint Injection
@@ -287,14 +359,16 @@ pipeline/
 ├── configs/
 │   └── default_config.yaml  # Template configuration
 │
-└── stages/                  # Stage wrappers (don't modify originals)
+└── stages/                      # Stage wrappers (don't modify originals)
     ├── __init__.py
-    ├── data_prep.py         # → datasets/prepare_zinc_tranche.py
-    ├── scattering.py        # → grassy_dit/extract_scattering_fixed.py
-    ├── splitting.py         # → grassy_dit/split_datasets.py
-    ├── train_grassy.py      # → train_grassy_fixed_scattering.py
-    ├── train_dit.py         # → grassy_dit/train.py
-    └── evaluate.py          # → evaluation/zinc_eval_direct.py
+    ├── data_prep.py             # → datasets/prepare_zinc_tranche.py
+    ├── scattering.py            # → grassy_dit/extract_scattering_fixed.py
+    ├── splitting.py             # → grassy_dit/split_datasets.py
+    ├── train_grassy.py          # → train_grassy_fixed_scattering.py
+    ├── train_dit.py             # → grassy_dit/train.py
+    ├── evaluate.py              # Conditional generation eval
+    ├── sample_unconstrained.py  # → grassy_dit/sample_unconstrained.py
+    └── sample_property_opt.py   # → grassy_dit/sample_property_optimization.py
 ```
 
 ## Notes

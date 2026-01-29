@@ -41,6 +41,8 @@ from pipeline.stages import (
     run_train_grassy,
     run_train_dit,
     run_evaluate,
+    run_sample_unconstrained,
+    run_sample_property_opt,
 )
 
 
@@ -162,6 +164,13 @@ Examples:
         help='Gaussian noise standard deviation (default: 0.2)',
     )
     
+    # Tokenization options
+    parser.add_argument(
+        '--moment-tokens',
+        action='store_true',
+        help='Add moment tokens (mean/var/skew/kurt) to scattering tokenization',
+    )
+    
     # Hardware
     parser.add_argument(
         '--device',
@@ -186,6 +195,58 @@ Examples:
         type=int,
         default=None,
         help='Number of molecules to generate for evaluation (default: 1000)',
+    )
+    
+    # Evaluation modes
+    parser.add_argument(
+        '--eval-conditional',
+        action='store_true',
+        default=None,
+        help='Run conditional generation evaluation (default: on)',
+    )
+    parser.add_argument(
+        '--no-eval-conditional',
+        action='store_true',
+        help='Skip conditional generation evaluation',
+    )
+    parser.add_argument(
+        '--eval-unconstrained',
+        action='store_true',
+        help='Run unconstrained prior sampling evaluation',
+    )
+    parser.add_argument(
+        '--eval-property-opt',
+        action='store_true',
+        help='Run property optimization evaluation',
+    )
+    
+    # Unconstrained sampling settings
+    parser.add_argument(
+        '--unconstrained-samples',
+        type=int,
+        default=None,
+        help='Number of samples for unconstrained generation (default: 1000)',
+    )
+    
+    # Property optimization settings
+    parser.add_argument(
+        '--property-target',
+        type=str,
+        default=None,
+        choices=['qed', 'logp', 'sa', 'mw', '0', '1', '2'],
+        help='Target property for optimization (default: qed)',
+    )
+    parser.add_argument(
+        '--property-trajectories',
+        type=int,
+        default=None,
+        help='Number of optimization trajectories (default: 10)',
+    )
+    parser.add_argument(
+        '--property-steps',
+        type=int,
+        default=None,
+        help='Optimization steps per trajectory (default: 50)',
     )
     
     # W&B
@@ -446,6 +507,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
                 wandb_enabled=config.logging.wandb.enabled,
                 wandb_project=config.logging.wandb.project,
                 wandb_entity=config.logging.wandb.entity,
+                use_moment_tokens=config.dit.use_moment_tokens,
             )
             
             ckpt_manager.register_stage_complete(
@@ -461,15 +523,8 @@ def run_pipeline(config: PipelineConfig) -> dict:
             raise
     
     # =========================================================================
-    # Stage 6: Evaluation
+    # Setup DiT Config for Evaluation Stages
     # =========================================================================
-    print("\n" + "=" * 70)
-    print(" STAGE 6: EVALUATION")
-    print("=" * 70)
-    
-    stage_start = time.time()
-    stage_dir = ckpt_manager.register_stage_start("evaluate")
-    
     # Find DiT config (either from training output or alongside checkpoint)
     dit_config_path = None
     if not skip_dit:
@@ -487,7 +542,9 @@ def run_pipeline(config: PipelineConfig) -> dict:
     
     if dit_config_path is None or not os.path.exists(dit_config_path):
         # Create minimal config for evaluation
-        dit_config_path = os.path.join(str(stage_dir), 'dit_config.yaml')
+        eval_dir = os.path.join(config.experiment.output_dir, 'evaluate')
+        os.makedirs(eval_dir, exist_ok=True)
+        dit_config_path = os.path.join(eval_dir, 'dit_config.yaml')
         import yaml
         with open(dit_config_path, 'w') as f:
             yaml.dump({
@@ -502,31 +559,127 @@ def run_pipeline(config: PipelineConfig) -> dict:
                 },
             }, f)
     
-    try:
-        report_path, metrics = run_evaluate(
-            test_dir=results['splitting']['test_dir'],
-            train_dir=results['splitting']['train_dir'],
-            dit_checkpoint=results['train_dit']['checkpoint'],
-            dit_config=dit_config_path,
-            output_dir=str(stage_dir),
-            grassy_checkpoint=results['train_grassy']['checkpoint'],
-            num_samples=config.evaluation.num_samples,
-            batch_size=config.evaluation.batch_size,
-            guide_scale=config.evaluation.guide_scale,
-            device=config.hardware.device,
-        )
+    # =========================================================================
+    # Stage 6: Conditional Evaluation (Optional, default: on)
+    # =========================================================================
+    if config.evaluation.run_conditional:
+        print("\n" + "=" * 70)
+        print(" STAGE 6: CONDITIONAL EVALUATION")
+        print("=" * 70)
         
-        ckpt_manager.register_stage_complete(
-            "evaluate",
-            checkpoint_path=report_path,
-            metrics=metrics,
-            duration_seconds=time.time() - stage_start,
-        )
-        results['evaluate'] = {'report_path': report_path, 'metrics': metrics}
+        stage_start = time.time()
+        stage_dir = ckpt_manager.register_stage_start("evaluate")
         
-    except Exception as e:
-        ckpt_manager.register_stage_failed("evaluate", str(e))
-        raise
+        try:
+            report_path, metrics = run_evaluate(
+                test_dir=results['splitting']['test_dir'],
+                train_dir=results['splitting']['train_dir'],
+                dit_checkpoint=results['train_dit']['checkpoint'],
+                dit_config=dit_config_path,
+                output_dir=str(stage_dir),
+                grassy_checkpoint=results['train_grassy']['checkpoint'],
+                num_samples=config.evaluation.num_samples,
+                batch_size=config.evaluation.batch_size,
+                guide_scale=config.evaluation.guide_scale,
+                device=config.hardware.device,
+            )
+            
+            ckpt_manager.register_stage_complete(
+                "evaluate",
+                checkpoint_path=report_path,
+                metrics=metrics,
+                duration_seconds=time.time() - stage_start,
+            )
+            results['evaluate'] = {'report_path': report_path, 'metrics': metrics}
+            
+        except Exception as e:
+            ckpt_manager.register_stage_failed("evaluate", str(e))
+            raise
+    else:
+        print("\n" + "=" * 70)
+        print(" STAGE 6: CONDITIONAL EVALUATION (SKIPPED)")
+        print("=" * 70)
+    
+    # =========================================================================
+    # Stage 7: Unconstrained Sampling (Optional)
+    # =========================================================================
+    if config.evaluation.run_unconstrained:
+        print("\n" + "=" * 70)
+        print(" STAGE 7: UNCONSTRAINED SAMPLING")
+        print("=" * 70)
+        
+        stage_start = time.time()
+        stage_dir = ckpt_manager.register_stage_start("sample_unconstrained")
+        
+        # Get training SMILES path
+        train_smiles_path = os.path.join(results['splitting']['train_dir'], 'molecules.csv')
+        
+        try:
+            samples_path, unconstrained_metrics = run_sample_unconstrained(
+                dit_checkpoint=results['train_dit']['checkpoint'],
+                dit_config=dit_config_path,
+                grassy_checkpoint=results['train_grassy']['checkpoint'],
+                output_dir=str(stage_dir),
+                training_smiles_path=train_smiles_path,
+                n_samples=config.evaluation.unconstrained_samples,
+                batch_size=config.evaluation.batch_size,
+                sampling_method=config.evaluation.unconstrained_method,
+                device=config.hardware.device,
+            )
+            
+            ckpt_manager.register_stage_complete(
+                "sample_unconstrained",
+                checkpoint_path=samples_path,
+                metrics=unconstrained_metrics,
+                duration_seconds=time.time() - stage_start,
+            )
+            results['sample_unconstrained'] = {
+                'samples_path': samples_path,
+                'metrics': unconstrained_metrics
+            }
+            
+        except Exception as e:
+            ckpt_manager.register_stage_failed("sample_unconstrained", str(e))
+            print(f"Warning: Unconstrained sampling failed: {e}")
+    
+    # =========================================================================
+    # Stage 8: Property Optimization (Optional)
+    # =========================================================================
+    if config.evaluation.run_property_opt:
+        print("\n" + "=" * 70)
+        print(" STAGE 8: PROPERTY OPTIMIZATION")
+        print("=" * 70)
+        
+        stage_start = time.time()
+        stage_dir = ckpt_manager.register_stage_start("sample_property_opt")
+        
+        try:
+            samples_path, opt_metrics = run_sample_property_opt(
+                dit_checkpoint=results['train_dit']['checkpoint'],
+                dit_config=dit_config_path,
+                grassy_checkpoint=results['train_grassy']['checkpoint'],
+                output_dir=str(stage_dir),
+                property_target=config.evaluation.property_target,
+                n_trajectories=config.evaluation.property_trajectories,
+                n_steps=config.evaluation.property_steps,
+                n_samples_per_traj=config.evaluation.property_samples_per_traj,
+                device=config.hardware.device,
+            )
+            
+            ckpt_manager.register_stage_complete(
+                "sample_property_opt",
+                checkpoint_path=samples_path,
+                metrics=opt_metrics,
+                duration_seconds=time.time() - stage_start,
+            )
+            results['sample_property_opt'] = {
+                'samples_path': samples_path,
+                'metrics': opt_metrics
+            }
+            
+        except Exception as e:
+            ckpt_manager.register_stage_failed("sample_property_opt", str(e))
+            print(f"Warning: Property optimization failed: {e}")
     
     # =========================================================================
     # Generate Final Report
@@ -577,6 +730,26 @@ def main():
     # Handle num_samples
     if args.num_samples:
         config.evaluation.num_samples = args.num_samples
+    
+    # Handle evaluation mode flags
+    if args.no_eval_conditional:
+        config.evaluation.run_conditional = False
+    if args.eval_unconstrained:
+        config.evaluation.run_unconstrained = True
+    if args.eval_property_opt:
+        config.evaluation.run_property_opt = True
+    
+    # Unconstrained settings
+    if args.unconstrained_samples:
+        config.evaluation.unconstrained_samples = args.unconstrained_samples
+    
+    # Property optimization settings
+    if args.property_target:
+        config.evaluation.property_target = args.property_target
+    if args.property_trajectories:
+        config.evaluation.property_trajectories = args.property_trajectories
+    if args.property_steps:
+        config.evaluation.property_steps = args.property_steps
     
     # Run pipeline
     try:

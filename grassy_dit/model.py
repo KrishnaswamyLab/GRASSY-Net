@@ -58,31 +58,40 @@ class CrossAttention(nn.Module):
 
 class ScatteringTokenizer(nn.Module):
     """
-    Dual tokenization: 440-D scattering → [B, num_atom_types + num_levels, D]
+    Dual/Triple tokenization: 440-D scattering → [B, num_tokens, D]
     
     Atom tokens: "What's each atom type's full scattering signature?"
     Level tokens: "What's happening at each scattering order/scale?"
+    Moment tokens (optional): "What's the distribution shape across all atoms/levels?"
     
-    Same moment data appears in both → model can query by atom OR by level.
+    Same moment data appears in multiple views → model can query by atom, level, or moment.
     """
     
     def __init__(self, hidden_size=384, num_atom_types=16, num_levels=11, 
-             num_moments=4, dropout=0.1, moment_noise_cfg=None): 
+             num_moments=4, dropout=0.1, moment_noise_cfg=None,
+             use_moment_tokens=False): 
         super().__init__()
         self.num_atom_types = num_atom_types
         self.num_levels = num_levels
         self.num_moments = num_moments
         self.dropout = dropout
         self.moment_noise_cfg = moment_noise_cfg or {}
+        self.use_moment_tokens = use_moment_tokens
     
-        # Total tokens = atom tokens + level tokens
-        self.num_tokens = num_atom_types + num_levels  # the double tokenization method discussed
+        # Total tokens = atom tokens + level tokens (+ moment tokens if enabled)
+        self.num_tokens = num_atom_types + num_levels
+        if use_moment_tokens:
+            self.num_tokens += num_moments
         
-        # prjecting the per atom tokens
+        # projecting the per atom tokens
         self.atom_proj = nn.Linear(num_levels * num_moments, hidden_size)
         
         # projecting the per level tokens
         self.level_proj = nn.Linear(num_atom_types * num_moments, hidden_size)
+        
+        # projecting the per moment tokens (optional)
+        if use_moment_tokens:
+            self.moment_proj = nn.Linear(num_atom_types * num_levels, hidden_size)
         
         # Positional embeddings for all tokens
         self.pos = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
@@ -147,8 +156,15 @@ class ScatteringTokenizer(nn.Module):
         level_tokens = x.permute(0, 2, 1, 3).reshape(B, self.num_levels, -1)
         level_tokens = self.level_proj(level_tokens)
         
-        # Concat: [B, A+L, D] = [B, 21, D]
-        tokens = torch.cat([atom_tokens, level_tokens], dim=1)
+        # Moment tokens (optional): [B, M, A*L] = [B, 4, 110] → [B, 4, D]
+        if self.use_moment_tokens:
+            moment_tokens = x.permute(0, 3, 1, 2).reshape(B, self.num_moments, -1)
+            moment_tokens = self.moment_proj(moment_tokens)
+            # Concat: [B, A+L+M, D] = [B, 27, D]
+            tokens = torch.cat([atom_tokens, level_tokens, moment_tokens], dim=1)
+        else:
+            # Concat: [B, A+L, D] = [B, 23, D]
+            tokens = torch.cat([atom_tokens, level_tokens], dim=1)
         
         # Add positional embeddings
         tokens = tokens + self.pos
@@ -226,7 +242,7 @@ class ScatteringDenoiser(nn.Module):
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
                  num_atom_types=16, num_levels=11, num_moments=4, device=None,
-                 moment_noise_cfg=None):
+                 moment_noise_cfg=None, use_moment_tokens=False):
         super().__init__()
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -235,6 +251,7 @@ class ScatteringDenoiser(nn.Module):
         self.device = device
         self.max_n_nodes = max_n_nodes
         self.hidden_size = hidden_size
+        self.use_moment_tokens = use_moment_tokens
         
         # Input embeddings
         self.x_embedder = nn.Linear(Xdim + max_n_nodes * Edim, hidden_size, bias=False)
@@ -244,7 +261,8 @@ class ScatteringDenoiser(nn.Module):
             num_atom_types=num_atom_types,
             num_levels=num_levels,
             num_moments=num_moments,
-            moment_noise_cfg=moment_noise_cfg
+            moment_noise_cfg=moment_noise_cfg,
+            use_moment_tokens=use_moment_tokens,
         )
         
         # Transformer blocks

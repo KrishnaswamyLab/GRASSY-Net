@@ -45,6 +45,7 @@ def run_train_dit(
     wandb_enabled: bool = False,
     wandb_project: str = "GRASSY-Pipeline",
     wandb_entity: str = "grassy",
+    use_moment_tokens: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Run DiT training stage.
@@ -163,6 +164,7 @@ def run_train_dit(
             'num_layer': num_layer,
             'num_head': num_head,
             'mlp_ratio': 4.0,
+            'use_moment_tokens': use_moment_tokens,
         },
         'training': {
             'epochs': epochs,
@@ -213,6 +215,7 @@ def run_train_dit(
     print(f"  - Heads: {num_head}")
     print(f"  - Noise prob: {noise_prob}")
     print(f"  - Noise std: {noise_std}")
+    print(f"  - Moment tokens: {use_moment_tokens}")
     
     model = ScatteringGraphDIT(config=config)
     

@@ -79,6 +79,8 @@ class DiTConfig:
     noise_std: float = 0.2  # Gaussian noise standard deviation
     noise_lower: float = 0.25  # Min fraction of moments to corrupt
     noise_upper: float = 1.0  # Max fraction of moments to corrupt
+    # Tokenization options
+    use_moment_tokens: bool = False  # Add moment tokens (mean/var/skew/kurt) to tokenization
 
 
 @dataclass
@@ -89,6 +91,18 @@ class EvaluationConfig:
     recon_samples: int = 50  # Molecules for reconstruction test
     recon_attempts: int = 10  # Attempts per molecule
     guide_scale: float = 2.0  # Classifier-free guidance scale
+    # Evaluation modes (which evaluations to run)
+    run_conditional: bool = True  # Standard conditional generation eval
+    run_unconstrained: bool = False  # Unconstrained prior sampling eval
+    run_property_opt: bool = False  # Property optimization eval
+    # Unconstrained sampling settings
+    unconstrained_samples: int = 1000
+    unconstrained_method: str = "prior"  # prior, training, noisy_training
+    # Property optimization settings
+    property_target: str = "qed"  # qed, logp, sa, or index 0-2
+    property_trajectories: int = 10
+    property_steps: int = 50
+    property_samples_per_traj: int = 10
 
 
 @dataclass
@@ -269,6 +283,8 @@ def merge_cli_args(config: PipelineConfig, args) -> PipelineConfig:
         config.dit.noise_prob = args.noise_prob
     if hasattr(args, 'noise_std') and args.noise_std is not None:
         config.dit.noise_std = args.noise_std
+    if hasattr(args, 'moment_tokens') and args.moment_tokens:
+        config.dit.use_moment_tokens = True
     
     # Hardware
     if hasattr(args, 'device') and args.device:

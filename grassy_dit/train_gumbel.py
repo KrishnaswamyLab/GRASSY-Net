@@ -456,6 +456,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         model_cfg = self.config.get('model', {})
         scattering_cfg = self.config.get('scattering', {})
+        use_moment_tokens = model_cfg.get('use_moment_tokens', False)
         
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
@@ -468,6 +469,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_levels=getattr(self, 'num_levels', 11),
             num_moments=getattr(self, 'num_moments', 4),
             device=self.device,
+            use_moment_tokens=use_moment_tokens,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser
