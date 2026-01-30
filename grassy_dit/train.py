@@ -125,6 +125,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self.checkpoint_dir = checkpoint_cfg.get('save_dir', './checkpoints')
         self.save_every_n_epochs = checkpoint_cfg.get('save_every_n_epochs', 10)
         self._best_loss = float('inf')
+        self._best_val_loss = float('inf')
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -213,38 +214,43 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         return self.model
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
-        """Override to add validation and save best checkpoint."""
+        """Override to add validation and save best checkpoint based on VAL loss."""
         print(f"Starting epoch {epoch}...", flush=True)
         
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         avg_train_loss = sum(losses) / len(losses)
         current_epoch = epoch + 1
         
-        # Save checkpoint FIRST if train loss improved
-        if self.checkpoint_dir and avg_train_loss < self._best_loss:
+        # Track best train loss for logging (but don't save based on it)
+        if avg_train_loss < self._best_loss:
             self._best_loss = avg_train_loss
-            self._save_best_checkpoint(current_epoch, avg_train_loss)
         
         # Run validation every N epochs (if val data exists)
         val_loss = None
         val_every = getattr(self, '_val_every_n_epochs', 1)
         if getattr(self, '_val_smiles', None) is not None and current_epoch % val_every == 0:
             val_loss = self._compute_val_loss()
-            if val_loss is not None and self.checkpoint_dir and val_loss < self._best_loss:
-                self._best_loss = val_loss
-                self._save_best_checkpoint(current_epoch, val_loss)
+            # Save best checkpoint based on VAL loss only
+            if val_loss is not None and self.checkpoint_dir:
+                if not hasattr(self, '_best_val_loss'):
+                    self._best_val_loss = float('inf')
+                if val_loss < self._best_val_loss:
+                    self._best_val_loss = val_loss
+                    self._save_best_checkpoint(current_epoch, val_loss)
         
         # Logging
         loss_str = f"Epoch {current_epoch}/{self.epochs} - Train: {avg_train_loss:.6f}"
         if val_loss is not None:
             loss_str += f" - Val: {val_loss:.6f}"
-        loss_str += f" - Best: {self._best_loss:.6f}"
+            loss_str += f" - BestVal: {getattr(self, '_best_val_loss', float('inf')):.6f}"
+        loss_str += f" - BestTrain: {self._best_loss:.6f}"
         print(loss_str)
         
         if wandb.run is not None:
-            log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_loss": self._best_loss}
+            log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_train_loss": self._best_loss}
             if val_loss is not None:
                 log_dict["val_loss"] = val_loss
+                log_dict["best_val_loss"] = getattr(self, '_best_val_loss', float('inf'))
             wandb.log(log_dict)
         
         return losses
@@ -418,6 +424,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self.model = None
             self._is_fitted = False
             self._best_loss = float('inf')
+            self._best_val_loss = float('inf')
             
             # Train this phase using parent's fit
             super().fit(X_train=X_train, y_train=y_train, **kwargs)
