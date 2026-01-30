@@ -343,6 +343,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         print(f"  Evaluating generation ({n_samples} samples)...", flush=True)
         self.model.eval()
         
+        # Temporarily mark as fitted so generate() works during training
+        # (torch_molecule's generate() checks is_fitted_ which is only set after fit() completes)
+        self.is_fitted_ = True
+        
         # Sample random scattering vectors from validation set
         n_scat = min(n_samples, len(self._val_scattering))
         indices = np.random.choice(len(self._val_scattering), n_scat, replace=False)
@@ -356,6 +360,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
                 smiles_list = self.generate(scattering=scat, batch_size=1)
                 generated_smiles.extend(smiles_list)
             except Exception as e:
+                print(f"    Generation exception for idx {idx}: {e}")
                 generated_smiles.append(None)
         
         # Compute validity
