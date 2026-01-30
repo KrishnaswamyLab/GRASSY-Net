@@ -25,7 +25,8 @@ from torch_molecule.generator.graph_dit.transformer import AttentionWithNodeMask
 class CrossAttention(nn.Module):
     """Q from graph, K/V from scattering tokens."""
     
-    def __init__(self, dim, num_heads=8, qkv_bias=True, qk_norm=True):
+    def __init__(self, dim, num_heads=8, qkv_bias=True, qk_norm=True,
+                 attn_drop=0.0, proj_drop=0.0):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -35,6 +36,9 @@ class CrossAttention(nn.Module):
         self.k = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> key
         self.v = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> value
         self.proj = nn.Linear(dim, dim) # output projection
+        
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj_drop = nn.Dropout(proj_drop)
 
         if qk_norm:
             self.q_norm = nn.LayerNorm(self.head_dim)
@@ -52,8 +56,15 @@ class CrossAttention(nn.Module):
             q = self.q_norm(q)
             k = self.k_norm(k)
         
-        out = F.scaled_dot_product_attention(q, k, v) 
-        return self.proj(out.transpose(1, 2).reshape(B, N, D)) 
+        # Manual attention with dropout (can't use F.scaled_dot_product_attention with dropout)
+        scale = self.head_dim ** -0.5
+        attn = (q @ k.transpose(-2, -1)) * scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+        out = attn @ v
+        
+        out = self.proj(out.transpose(1, 2).reshape(B, N, D))
+        return self.proj_drop(out) 
 
 
 class ScatteringTokenizer(nn.Module):
@@ -185,15 +196,16 @@ def modulate(x, shift, scale):
 class SELayerWithCrossAttention(nn.Module):
     """DiT block: self-attn + cross-attn + MLP, all modulated by timestep (AdalN)."""
     
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, cross_attn_drop=0.0):
         super().__init__()
         # Self-attention
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False)
         self.attn = Attention(hidden_size, num_head=num_heads, qkv_bias=True, qk_norm=True)
         
-        # Cross-attention to scattering
+        # Cross-attention to scattering (with configurable dropout)
         self.norm_cross = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.cross_attn = CrossAttention(hidden_size, num_heads, qkv_bias=True, qk_norm=True)
+        self.cross_attn = CrossAttention(hidden_size, num_heads, qkv_bias=True, qk_norm=True,
+                                         attn_drop=cross_attn_drop, proj_drop=cross_attn_drop)
         
         # MLP
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False)
@@ -243,7 +255,8 @@ class ScatteringDenoiser(nn.Module):
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
                  num_atom_types=16, num_levels=11, num_moments=4, device=None,
-                 moment_noise_cfg=None, use_moment_tokens=False, training_stage=1):
+                 moment_noise_cfg=None, use_moment_tokens=False, training_stage=1,
+                 cross_attn_drop=0.0):
         super().__init__()
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -254,6 +267,7 @@ class ScatteringDenoiser(nn.Module):
         self.hidden_size = hidden_size
         self.use_moment_tokens = use_moment_tokens
         self.training_stage = training_stage  # 1 = unconditional, 2 = cross-attention only
+        self.cross_attn_drop = cross_attn_drop
         
         # Input embeddings
         self.x_embedder = nn.Linear(Xdim + max_n_nodes * Edim, hidden_size, bias=False)
@@ -267,9 +281,9 @@ class ScatteringDenoiser(nn.Module):
             use_moment_tokens=use_moment_tokens,
         )
         
-        # Transformer blocks
+        # Transformer blocks (with cross-attention dropout)
         self.blocks = nn.ModuleList([
-            SELayerWithCrossAttention(hidden_size, num_heads, mlp_ratio)
+            SELayerWithCrossAttention(hidden_size, num_heads, mlp_ratio, cross_attn_drop=cross_attn_drop)
             for _ in range(depth)
         ])
         

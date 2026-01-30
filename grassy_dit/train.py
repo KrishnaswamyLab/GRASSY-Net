@@ -171,6 +171,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         # Check for moment tokens config
         use_moment_tokens = model_cfg.get('use_moment_tokens', False)
         
+        # Cross-attention dropout (helps prevent overfitting to scattering moments)
+        cross_attn_drop = model_cfg.get('cross_attn_drop', 0.0)
+        
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
             hidden_size=self.hidden_size,
@@ -185,6 +188,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             moment_noise_cfg=moment_noise_cfg,
             use_moment_tokens=use_moment_tokens,
             training_stage=training_stage,
+            cross_attn_drop=cross_attn_drop,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser

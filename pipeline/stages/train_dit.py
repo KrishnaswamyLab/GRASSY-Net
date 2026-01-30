@@ -214,12 +214,14 @@ def run_train_dit(
     )
     
     # Create model
+    cross_attn_drop = config.get('model', {}).get('cross_attn_drop', 0.0)
     print(f"\nInitializing model:")
     print(f"  - Hidden size: {hidden_size}")
     print(f"  - Layers: {num_layer}")
     print(f"  - Heads: {num_head}")
     print(f"  - Noise prob: {noise_prob}")
     print(f"  - Noise std: {noise_std}")
+    print(f"  - Cross-attn dropout: {cross_attn_drop}")
     print(f"  - Moment tokens: {use_moment_tokens}")
     
     model = ScatteringGraphDIT(config=config)
