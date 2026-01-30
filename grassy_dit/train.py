@@ -126,6 +126,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self.save_every_n_epochs = checkpoint_cfg.get('save_every_n_epochs', 10)
         self._best_loss = float('inf')
         self._best_val_loss = float('inf')
+        self._best_vu_score = 0.0  # For stage 1: Validity * Uniqueness
+        self._gen_eval_every = 50  # Evaluate generation metrics every N epochs
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -214,43 +216,79 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         return self.model
     
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
-        """Override to add validation and save best checkpoint based on VAL loss."""
+        """
+        Override to add stage-aware checkpointing:
+        - Stage 1 (unconditional): Save based on Validity * Uniqueness every N epochs
+        - Stage 2 & 3 (cross-attention): Save based on validation loss
+        """
         print(f"Starting epoch {epoch}...", flush=True)
         
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         avg_train_loss = sum(losses) / len(losses)
         current_epoch = epoch + 1
         
-        # Track best train loss for logging (but don't save based on it)
+        # Track best train loss for logging
         if avg_train_loss < self._best_loss:
             self._best_loss = avg_train_loss
         
-        # Run validation every N epochs (if val data exists)
+        # Get current training stage
+        training_stage = getattr(self.model.denoiser, 'training_stage', 0)
+        
+        # Initialize tracking variables
         val_loss = None
-        val_every = getattr(self, '_val_every_n_epochs', 1)
-        if getattr(self, '_val_smiles', None) is not None and current_epoch % val_every == 0:
-            val_loss = self._compute_val_loss()
-            # Save best checkpoint based on VAL loss only
-            if val_loss is not None and self.checkpoint_dir:
-                if not hasattr(self, '_best_val_loss'):
-                    self._best_val_loss = float('inf')
-                if val_loss < self._best_val_loss:
-                    self._best_val_loss = val_loss
-                    self._save_best_checkpoint(current_epoch, val_loss)
+        validity = None
+        uniqueness = None
+        vu_score = None
+        
+        if training_stage == 1:
+            # ===== STAGE 1: Use V*U for checkpointing =====
+            if current_epoch % self._gen_eval_every == 0:
+                validity, uniqueness, vu_score = self._compute_generation_metrics(n_samples=100)
+                
+                if vu_score is not None and self.checkpoint_dir:
+                    if vu_score > self._best_vu_score:
+                        self._best_vu_score = vu_score
+                        self._save_best_checkpoint_vu(current_epoch, validity, uniqueness, vu_score)
+        else:
+            # ===== STAGE 2 & 3: Use validation loss for checkpointing =====
+            val_every = getattr(self, '_val_every_n_epochs', 1)
+            if getattr(self, '_val_smiles', None) is not None and current_epoch % val_every == 0:
+                val_loss = self._compute_val_loss()
+                
+                if val_loss is not None and self.checkpoint_dir:
+                    if val_loss < self._best_val_loss:
+                        self._best_val_loss = val_loss
+                        self._save_best_checkpoint(current_epoch, val_loss)
+        
+        # Save latest checkpoint every 50 epochs (for all stages)
+        if current_epoch % 50 == 0 and self.checkpoint_dir:
+            self._save_latest_checkpoint(current_epoch)
         
         # Logging
         loss_str = f"Epoch {current_epoch}/{self.epochs} - Train: {avg_train_loss:.6f}"
-        if val_loss is not None:
-            loss_str += f" - Val: {val_loss:.6f}"
-            loss_str += f" - BestVal: {getattr(self, '_best_val_loss', float('inf')):.6f}"
+        if training_stage == 1:
+            if vu_score is not None:
+                loss_str += f" - V:{validity:.1f}% U:{uniqueness:.1f}% V*U:{vu_score:.1f}"
+                loss_str += f" - BestV*U: {self._best_vu_score:.1f}"
+        else:
+            if val_loss is not None:
+                loss_str += f" - Val: {val_loss:.6f}"
+                loss_str += f" - BestVal: {self._best_val_loss:.6f}"
         loss_str += f" - BestTrain: {self._best_loss:.6f}"
         print(loss_str)
         
         if wandb.run is not None:
             log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_train_loss": self._best_loss}
-            if val_loss is not None:
-                log_dict["val_loss"] = val_loss
-                log_dict["best_val_loss"] = getattr(self, '_best_val_loss', float('inf'))
+            if training_stage == 1:
+                if vu_score is not None:
+                    log_dict["validity"] = validity
+                    log_dict["uniqueness"] = uniqueness
+                    log_dict["vu_score"] = vu_score
+                    log_dict["best_vu_score"] = self._best_vu_score
+            else:
+                if val_loss is not None:
+                    log_dict["val_loss"] = val_loss
+                    log_dict["best_val_loss"] = self._best_val_loss
             wandb.log(log_dict)
         
         return losses
@@ -287,6 +325,54 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         self.model.train()
         return total_loss / num_batches if num_batches > 0 else None
+
+    @torch.no_grad()
+    def _compute_generation_metrics(self, n_samples=100):
+        """
+        Generate molecules and compute Validity * Uniqueness score.
+        Used for Stage 1 (unconditional) checkpointing.
+        """
+        if self._val_scattering is None or len(self._val_scattering) == 0:
+            print("Warning: No validation scattering for generation metrics")
+            return None, None, None
+        
+        print(f"  Evaluating generation ({n_samples} samples)...", flush=True)
+        self.model.eval()
+        
+        # Sample random scattering vectors from validation set
+        n_scat = min(n_samples, len(self._val_scattering))
+        indices = np.random.choice(len(self._val_scattering), n_scat, replace=False)
+        
+        generated_smiles = []
+        for idx in indices:
+            try:
+                scat = self._val_scattering[idx]
+                if isinstance(scat, np.ndarray):
+                    scat = torch.from_numpy(scat).float()
+                smiles_list = self.generate(scattering=scat, batch_size=1)
+                generated_smiles.extend(smiles_list)
+            except Exception as e:
+                generated_smiles.append(None)
+        
+        # Compute validity
+        valid_smiles = []
+        for smi in generated_smiles:
+            if smi is not None:
+                mol = Chem.MolFromSmiles(smi)
+                if mol is not None:
+                    valid_smiles.append(Chem.MolToSmiles(mol))
+        
+        validity = 100.0 * len(valid_smiles) / len(generated_smiles) if len(generated_smiles) > 0 else 0.0
+        
+        # Compute uniqueness
+        unique_smiles = list(set(valid_smiles))
+        uniqueness = 100.0 * len(unique_smiles) / len(valid_smiles) if len(valid_smiles) > 0 else 0.0
+        
+        # V * U score (0-100 scale for each, so max is 10000)
+        vu_score = (validity / 100.0) * (uniqueness / 100.0) * 100.0  # Scale to 0-100
+        
+        self.model.train()
+        return validity, uniqueness, vu_score
 
     def _save_best_checkpoint(self, epoch, loss):
         """Save the best checkpoint, removing previous best."""
@@ -325,6 +411,82 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             wandb.save(checkpoint_path)
             wandb.log({"best_loss": loss, "best_epoch": epoch})
 
+    def _save_best_checkpoint_vu(self, epoch, validity, uniqueness, vu_score):
+        """Save best checkpoint based on V*U score (Stage 1)."""
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_best.pt")
+        
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "hyperparameters": {
+                "max_node": self.max_node,
+                "hidden_size": self.hidden_size,
+                "num_layer": self.num_layer,
+                "num_head": self.num_head,
+                "mlp_ratio": self.mlp_ratio,
+                "dropout": self.dropout,
+                "drop_condition": self.drop_condition,
+                "input_dim_X": self.input_dim_X,
+                "input_dim_E": self.input_dim_E,
+                "input_dim_y": self.input_dim_y,
+                "task_type": self.task_type,
+                "timesteps": self.timesteps,
+                "dataset_info": self.dataset_info,
+                "num_atom_types": getattr(self, 'num_atom_types', None),
+                "num_levels": getattr(self, 'num_levels', None),
+                "num_moments": getattr(self, 'num_moments', None),
+            },
+            "fitting_epoch": epoch,
+            "fitting_loss": self.fitting_loss,
+            "validity": validity,
+            "uniqueness": uniqueness,
+            "vu_score": vu_score,
+        }
+        
+        torch.save(checkpoint, checkpoint_path)
+        print(f"New best checkpoint at epoch {epoch} (V:{validity:.1f}% U:{uniqueness:.1f}% V*U:{vu_score:.1f})")
+        
+        if wandb.run is not None:
+            wandb.save(checkpoint_path)
+            wandb.log({"best_vu_score": vu_score, "best_validity": validity, "best_uniqueness": uniqueness, "best_epoch": epoch})
+
+    def _save_latest_checkpoint(self, epoch):
+        """Save latest checkpoint for resuming (every 50 epochs)."""
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(self.checkpoint_dir, f"latest.pt")
+        
+        training_stage = getattr(self.model.denoiser, 'training_stage', 0)
+        
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "hyperparameters": {
+                "max_node": self.max_node,
+                "hidden_size": self.hidden_size,
+                "num_layer": self.num_layer,
+                "num_head": self.num_head,
+                "mlp_ratio": self.mlp_ratio,
+                "dropout": self.dropout,
+                "drop_condition": self.drop_condition,
+                "input_dim_X": self.input_dim_X,
+                "input_dim_E": self.input_dim_E,
+                "input_dim_y": self.input_dim_y,
+                "task_type": self.task_type,
+                "timesteps": self.timesteps,
+                "dataset_info": self.dataset_info,
+                "num_atom_types": getattr(self, 'num_atom_types', None),
+                "num_levels": getattr(self, 'num_levels', None),
+                "num_moments": getattr(self, 'num_moments', None),
+            },
+            "fitting_epoch": epoch,
+            "fitting_loss": self.fitting_loss,
+            "training_stage": training_stage,
+            "best_loss": self._best_loss,
+            "best_val_loss": self._best_val_loss,
+            "best_vu_score": self._best_vu_score,
+        }
+        
+        torch.save(checkpoint, checkpoint_path)
+        print(f"Saved latest checkpoint at epoch {epoch}")
 
     def fit(self, X_train, y_train, X_val=None, y_val=None, val_every_n_epochs=1, **kwargs):
         """Override fit to add validation, Wandb logging, and multi-phase training."""
