@@ -67,4 +67,4 @@ wandb/
 # !external/moses/**/*.csv
 
 #Ignore .npy
-*.npy
+*.npygenerated_*.txt

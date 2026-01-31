@@ -49,6 +49,7 @@ def run_train_dit(
     # Multi-phase training (optional)
     phase_epochs: Optional[str] = None,  # e.g. "1000,500,500"
     phase_lrs: Optional[str] = None,     # e.g. "2e-4,1e-4,5e-5"
+    stage3_base_lr_ratio: Optional[float] = None,  # In Stage 3, base model gets lr*ratio
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Run DiT training stage.
@@ -175,6 +176,7 @@ def run_train_dit(
             'learning_rate': learning_rate,
             'phase_epochs': phase_epochs,  # Multi-phase: e.g. "1000,500,500"
             'phase_lrs': phase_lrs,        # Multi-phase: e.g. "2e-4,1e-4,5e-5"
+            'stage3_base_lr_ratio': stage3_base_lr_ratio,  # In Stage 3, base params get lr*ratio
         },
         'checkpoint': {
             'save_dir': output_dir,

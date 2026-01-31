@@ -84,6 +84,7 @@ class DiTConfig:
     # Multi-phase training (optional)
     phase_epochs: Optional[str] = None  # e.g. "1000,500,500" for Stage1,Stage2,Stage3
     phase_lrs: Optional[str] = None     # e.g. "2e-4,1e-4,5e-5" learning rates per phase
+    stage3_base_lr_ratio: Optional[float] = None  # In Stage 3, base model gets lr*ratio (None = same lr for all)
 
 
 @dataclass
@@ -292,6 +293,8 @@ def merge_cli_args(config: PipelineConfig, args) -> PipelineConfig:
         config.dit.phase_epochs = args.phase_epochs
     if hasattr(args, 'phase_lrs') and args.phase_lrs is not None:
         config.dit.phase_lrs = args.phase_lrs
+    if hasattr(args, 'stage3_base_lr_ratio') and args.stage3_base_lr_ratio is not None:
+        config.dit.stage3_base_lr_ratio = args.stage3_base_lr_ratio
     
     # Hardware
     if hasattr(args, 'device') and args.device:

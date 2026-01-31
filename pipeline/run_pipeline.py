@@ -177,6 +177,12 @@ Examples:
         default=None,
         help='Multi-phase learning rates, comma-separated (e.g., "2e-4,1e-4,5e-5")',
     )
+    parser.add_argument(
+        '--stage3-base-lr-ratio',
+        type=float,
+        default=None,
+        help='In Stage 3, use lr*ratio for base model, full lr for cross-attention (default: None = same lr for all)',
+    )
     
     # Tokenization options
     parser.add_argument(
@@ -524,6 +530,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
                 use_moment_tokens=config.dit.use_moment_tokens,
                 phase_epochs=config.dit.phase_epochs,
                 phase_lrs=config.dit.phase_lrs,
+                stage3_base_lr_ratio=config.dit.stage3_base_lr_ratio,
             )
             
             ckpt_manager.register_stage_complete(

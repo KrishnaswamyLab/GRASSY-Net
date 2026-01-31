@@ -458,6 +458,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         scattering_cfg = self.config.get('scattering', {})
         use_moment_tokens = model_cfg.get('use_moment_tokens', False)
         
+        # Two-stage training config
+        training_stage = model_cfg.get('training_stage', 1)
+        stage1_checkpoint = model_cfg.get('stage1_checkpoint', None)
+        
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
             hidden_size=self.hidden_size,
@@ -470,12 +474,24 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_moments=getattr(self, 'num_moments', 4),
             device=self.device,
             use_moment_tokens=use_moment_tokens,
+            training_stage=training_stage,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser
         ).to(self.device)
         
-        if checkpoint is not None:
+        # Handle checkpoint loading based on training stage
+        if training_stage == 2:
+            # Stage 2: Load Stage 1 checkpoint and freeze base model
+            if stage1_checkpoint is None:
+                raise ValueError("Stage 2 training requires 'stage1_checkpoint' path in model config")
+            print(f"\n=== STAGE 2 TRAINING ===")
+            print(f"Loading Stage 1 checkpoint: {stage1_checkpoint}")
+            stage1_ckpt = torch.load(stage1_checkpoint, map_location=self.device)
+            self.model.load_state_dict(stage1_ckpt["model_state_dict"])
+            self.model.denoiser.freeze_for_stage2()
+        elif checkpoint is not None:
+            # Stage 1 with resume, or regular training
             self.model.load_state_dict(checkpoint["model_state_dict"])
         
         # Initialize differentiable generator for consistency loss

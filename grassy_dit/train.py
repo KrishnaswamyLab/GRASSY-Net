@@ -128,6 +128,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self._best_val_loss = float('inf')
         self._best_vu_score = 0.0  # For stage 1: Validity * Uniqueness
         self._gen_eval_every = 50  # Evaluate generation metrics every N epochs
+        # Stage 3 differential LR (optional): base model gets lr*ratio, cross-attn gets lr
+        self._stage3_base_lr_ratio = training_cfg.get('stage3_base_lr_ratio', None)
+        self._optimizer_modified_for_stage3 = False  # Track if we've modified optimizer
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -225,6 +228,16 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         - Stage 1 (unconditional): Save based on Validity * Uniqueness every N epochs
         - Stage 2 & 3 (cross-attention): Save based on validation loss
         """
+        # Stage 3 differential LR: modify optimizer param groups at epoch 0
+        training_stage = getattr(self.model.denoiser, 'training_stage', 0)
+        if (training_stage == 3 and 
+            epoch == 0 and 
+            self._stage3_base_lr_ratio is not None and 
+            not self._optimizer_modified_for_stage3):
+            
+            self._modify_optimizer_for_stage3(optimizer)
+            self._optimizer_modified_for_stage3 = True
+        
         print(f"Starting epoch {epoch}...", flush=True)
         
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
@@ -296,6 +309,51 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             wandb.log(log_dict)
         
         return losses
+
+    def _modify_optimizer_for_stage3(self, optimizer):
+        """
+        Modify optimizer param groups for Stage 3 differential learning rates.
+        
+        Cross-attention and scattering tokenizer get the full LR (for conditioning).
+        Base model params get lr * stage3_base_lr_ratio (to preserve learned generation).
+        """
+        base_lr = self.learning_rate
+        ratio = self._stage3_base_lr_ratio
+        reduced_lr = base_lr * ratio
+        
+        print(f"\n=== Stage 3 Differential LR ===")
+        print(f"  Base model LR: {reduced_lr:.2e} (ratio={ratio})")
+        print(f"  Cross-attention LR: {base_lr:.2e}")
+        
+        # Identify cross-attention and scattering tokenizer parameters
+        cross_attn_params = set()
+        base_params = set()
+        
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if 'cross_attn' in name or 'scatter_tokenizer' in name or 'norm_cross' in name:
+                    cross_attn_params.add(param)
+                else:
+                    base_params.add(param)
+        
+        print(f"  Cross-attention params: {len(cross_attn_params)}")
+        print(f"  Base model params: {len(base_params)}")
+        
+        # Clear existing param_groups and create new ones
+        optimizer.param_groups.clear()
+        
+        optimizer.add_param_group({
+            'params': list(base_params),
+            'lr': reduced_lr,
+            'name': 'base_model'
+        })
+        optimizer.add_param_group({
+            'params': list(cross_attn_params),
+            'lr': base_lr,
+            'name': 'cross_attention'
+        })
+        
+        print(f"  Optimizer modified with 2 param groups\n")
 
     @torch.no_grad()
     def _compute_val_loss(self):
@@ -596,6 +654,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self._is_fitted = False
             self._best_loss = float('inf')
             self._best_val_loss = float('inf')
+            self._optimizer_modified_for_stage3 = False  # Reset optimizer modification flag
             
             # Train this phase using parent's fit
             super().fit(X_train=X_train, y_train=y_train, **kwargs)
