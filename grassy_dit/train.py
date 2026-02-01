@@ -161,7 +161,12 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     def _initialize_model(self, model_class, checkpoint=None):
         """Override to use ScatteringDenoiser instead of Transformer."""
         if checkpoint is not None:
-            self._setup_diffusion_params(checkpoint)
+            # Only call _setup_diffusion_params if checkpoint has full format
+            # Phase checkpoints (from internal multi-phase training) don't have hyperparameters
+            if "hyperparameters" in checkpoint:
+                self._setup_diffusion_params(checkpoint)
+            else:
+                print("Phase checkpoint detected - using config for diffusion params")
         
         model_cfg = self.config.get('model', {})
         aug_cfg = self.config.get('augmentation', {})
@@ -631,6 +636,14 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         for phase_idx, (epochs, lr) in enumerate(zip(phase_epochs, phase_lrs)):
             phase_num = phase_idx + 1
+            
+            # Skip phases with 0 epochs (for resuming from checkpoint)
+            if epochs == 0:
+                print(f"\n{'='*60}")
+                print(f"PHASE {phase_num}/{num_phases}: SKIPPED (0 epochs)")
+                print(f"{'='*60}")
+                continue
+            
             print(f"\n{'='*60}")
             print(f"PHASE {phase_num}/{num_phases}: {epochs} epochs, LR={lr}")
             print(f"{'='*60}")
@@ -654,8 +667,14 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self.learning_rate = lr
             
             # Reset model state for new phase
-            self.model = None
-            self._is_fitted = False
+            # BUT: if model was pre-loaded (e.g., from --dit-checkpoint) and no prev_checkpoint,
+            # preserve it for Stage 3 resume
+            if prev_checkpoint is not None or phase_num == 1:
+                self.model = None
+                self._is_fitted = False
+            else:
+                # Keep pre-loaded model (resume from external checkpoint)
+                print("Using pre-loaded model (no previous phase checkpoint)")
             self._best_loss = float('inf')
             self._best_val_loss = float('inf')
             self._optimizer_modified_for_stage3 = False  # Reset optimizer modification flag
