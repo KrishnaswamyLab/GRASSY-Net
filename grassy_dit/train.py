@@ -160,6 +160,11 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
     
     def _initialize_model(self, model_class, checkpoint=None):
         """Override to use ScatteringDenoiser instead of Transformer."""
+        # Skip if model already exists (resume from external checkpoint)
+        if self.model is not None and checkpoint is None:
+            print("Model already initialized - skipping re-initialization")
+            return
+        
         if checkpoint is not None:
             # Only call _setup_diffusion_params if checkpoint has full format
             # Phase checkpoints (from internal multi-phase training) don't have hyperparameters
