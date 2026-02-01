@@ -725,6 +725,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             else:
                 # Keep pre-loaded model (resume from external checkpoint)
                 print("Using pre-loaded model (no previous phase checkpoint)")
+                # CRITICAL: Update model's training_stage to match current phase
+                if self.model is not None:
+                    self.model.denoiser.training_stage = phase_num
+                    print(f"  Updated model.denoiser.training_stage = {phase_num}")
             self._best_loss = float('inf')
             self._best_val_loss = float('inf')
             self._optimizer_modified_for_stage3 = False  # Reset optimizer modification flag
