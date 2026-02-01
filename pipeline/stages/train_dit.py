@@ -50,6 +50,9 @@ def run_train_dit(
     phase_epochs: Optional[str] = None,  # e.g. "1000,500,500"
     phase_lrs: Optional[str] = None,     # e.g. "2e-4,1e-4,5e-5"
     stage3_base_lr_ratio: Optional[float] = None,  # In Stage 3, base model gets lr*ratio
+    # Cross-attention regularization
+    cross_attn_drop: float = 0.0,  # Dropout in cross-attention layers
+    cross_attn_bottleneck: Optional[int] = None,  # Bottleneck dim (None = no bottleneck)
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Run DiT training stage.
@@ -169,6 +172,8 @@ def run_train_dit(
             'num_head': num_head,
             'mlp_ratio': 4.0,
             'use_moment_tokens': use_moment_tokens,
+            'cross_attn_drop': cross_attn_drop,
+            'cross_attn_bottleneck': cross_attn_bottleneck,
         },
         'training': {
             'epochs': epochs,
@@ -216,7 +221,6 @@ def run_train_dit(
     )
     
     # Create model
-    cross_attn_drop = config.get('model', {}).get('cross_attn_drop', 0.0)
     print(f"\nInitializing model:")
     print(f"  - Hidden size: {hidden_size}")
     print(f"  - Layers: {num_layer}")
@@ -224,6 +228,7 @@ def run_train_dit(
     print(f"  - Noise prob: {noise_prob}")
     print(f"  - Noise std: {noise_std}")
     print(f"  - Cross-attn dropout: {cross_attn_drop}")
+    print(f"  - Cross-attn bottleneck: {cross_attn_bottleneck}")
     print(f"  - Moment tokens: {use_moment_tokens}")
     
     model = ScatteringGraphDIT(config=config)

@@ -23,19 +23,36 @@ from torch_molecule.generator.graph_dit.transformer import AttentionWithNodeMask
 
 
 class CrossAttention(nn.Module):
-    """Q from graph, K/V from scattering tokens."""
+    """Q from graph, K/V from scattering tokens.
+    
+    Optional bottleneck: project to smaller dim before attention to reduce
+    overfitting to conditioning signal while preserving base model capacity.
+    """
     
     def __init__(self, dim, num_heads=8, qkv_bias=True, qk_norm=True,
-                 attn_drop=0.0, proj_drop=0.0):
+                 attn_drop=0.0, proj_drop=0.0, bottleneck_dim=None):
         super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
+        self.dim = dim
+        self.bottleneck_dim = bottleneck_dim
         self.qk_norm = qk_norm
         
-        self.q = nn.Linear(dim, dim, bias=qkv_bias) # graph tokens -> query
-        self.k = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> key
-        self.v = nn.Linear(dim, dim, bias=qkv_bias) # scattering tokens -> value
-        self.proj = nn.Linear(dim, dim) # output projection
+        # Bottleneck projections (optional) - reduces conditioning capacity
+        if bottleneck_dim is not None:
+            self.q_down = nn.Linear(dim, bottleneck_dim)
+            self.kv_down = nn.Linear(dim, bottleneck_dim)
+            self.out_up = nn.Linear(bottleneck_dim, dim)
+            attn_dim = bottleneck_dim
+        else:
+            attn_dim = dim
+        
+        self.num_heads = num_heads
+        self.head_dim = attn_dim // num_heads
+        
+        # Q/K/V in attention space (bottleneck or full)
+        self.q = nn.Linear(attn_dim, attn_dim, bias=qkv_bias)
+        self.k = nn.Linear(attn_dim, attn_dim, bias=qkv_bias)
+        self.v = nn.Linear(attn_dim, attn_dim, bias=qkv_bias)
+        self.proj = nn.Linear(attn_dim, attn_dim)
         
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -45,8 +62,15 @@ class CrossAttention(nn.Module):
             self.k_norm = nn.LayerNorm(self.head_dim)
 
     def forward(self, x, context):
-        B, N, D = x.shape
+        B, N, _ = x.shape
         K = context.shape[1]
+        
+        # Bottleneck: project down to smaller space
+        if self.bottleneck_dim is not None:
+            x = self.q_down(x)
+            context = self.kv_down(context)
+        
+        attn_dim = self.bottleneck_dim if self.bottleneck_dim else self.dim
         
         q = self.q(x).reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k(context).reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2)
@@ -63,7 +87,12 @@ class CrossAttention(nn.Module):
         attn = self.attn_drop(attn)
         out = attn @ v
         
-        out = self.proj(out.transpose(1, 2).reshape(B, N, D))
+        out = self.proj(out.transpose(1, 2).reshape(B, N, attn_dim))
+        
+        # Bottleneck: project back up to original space
+        if self.bottleneck_dim is not None:
+            out = self.out_up(out)
+        
         return self.proj_drop(out) 
 
 
@@ -196,16 +225,18 @@ def modulate(x, shift, scale):
 class SELayerWithCrossAttention(nn.Module):
     """DiT block: self-attn + cross-attn + MLP, all modulated by timestep (AdalN)."""
     
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, cross_attn_drop=0.0):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, cross_attn_drop=0.0,
+                 cross_attn_bottleneck=None):
         super().__init__()
         # Self-attention
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False)
         self.attn = Attention(hidden_size, num_head=num_heads, qkv_bias=True, qk_norm=True)
         
-        # Cross-attention to scattering (with configurable dropout)
+        # Cross-attention to scattering (with configurable dropout and optional bottleneck)
         self.norm_cross = nn.LayerNorm(hidden_size, elementwise_affine=False)
         self.cross_attn = CrossAttention(hidden_size, num_heads, qkv_bias=True, qk_norm=True,
-                                         attn_drop=cross_attn_drop, proj_drop=cross_attn_drop)
+                                         attn_drop=cross_attn_drop, proj_drop=cross_attn_drop,
+                                         bottleneck_dim=cross_attn_bottleneck)
         
         # MLP
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False)
@@ -256,7 +287,7 @@ class ScatteringDenoiser(nn.Module):
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
                  num_atom_types=16, num_levels=11, num_moments=4, device=None,
                  moment_noise_cfg=None, use_moment_tokens=False, training_stage=1,
-                 cross_attn_drop=0.0):
+                 cross_attn_drop=0.0, cross_attn_bottleneck=None):
         super().__init__()
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -268,6 +299,7 @@ class ScatteringDenoiser(nn.Module):
         self.use_moment_tokens = use_moment_tokens
         self.training_stage = training_stage  # 1 = unconditional, 2 = cross-attention only
         self.cross_attn_drop = cross_attn_drop
+        self.cross_attn_bottleneck = cross_attn_bottleneck
         
         # Input embeddings
         self.x_embedder = nn.Linear(Xdim + max_n_nodes * Edim, hidden_size, bias=False)
@@ -281,9 +313,11 @@ class ScatteringDenoiser(nn.Module):
             use_moment_tokens=use_moment_tokens,
         )
         
-        # Transformer blocks (with cross-attention dropout)
+        # Transformer blocks (with cross-attention dropout and optional bottleneck)
         self.blocks = nn.ModuleList([
-            SELayerWithCrossAttention(hidden_size, num_heads, mlp_ratio, cross_attn_drop=cross_attn_drop)
+            SELayerWithCrossAttention(hidden_size, num_heads, mlp_ratio, 
+                                      cross_attn_drop=cross_attn_drop,
+                                      cross_attn_bottleneck=cross_attn_bottleneck)
             for _ in range(depth)
         ])
         

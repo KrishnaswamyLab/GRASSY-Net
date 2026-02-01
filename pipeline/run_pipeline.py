@@ -531,6 +531,8 @@ def run_pipeline(config: PipelineConfig) -> dict:
                 phase_epochs=config.dit.phase_epochs,
                 phase_lrs=config.dit.phase_lrs,
                 stage3_base_lr_ratio=config.dit.stage3_base_lr_ratio,
+                cross_attn_drop=config.dit.cross_attn_drop,
+                cross_attn_bottleneck=config.dit.cross_attn_bottleneck,
             )
             
             ckpt_manager.register_stage_complete(

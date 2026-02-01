@@ -177,6 +177,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         # Cross-attention dropout (helps prevent overfitting to scattering moments)
         cross_attn_drop = model_cfg.get('cross_attn_drop', 0.0)
         
+        # Cross-attention bottleneck (restricts conditioning capacity to force generalization)
+        cross_attn_bottleneck = model_cfg.get('cross_attn_bottleneck', None)
+        
         denoiser = ScatteringDenoiser(
             max_n_nodes=self.max_node,
             hidden_size=self.hidden_size,
@@ -192,6 +195,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             use_moment_tokens=use_moment_tokens,
             training_stage=training_stage,
             cross_attn_drop=cross_attn_drop,
+            cross_attn_bottleneck=cross_attn_bottleneck,
         )
         self.model = ScatteringTransformerAdapter(
             denoiser

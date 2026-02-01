@@ -85,6 +85,9 @@ class DiTConfig:
     phase_epochs: Optional[str] = None  # e.g. "1000,500,500" for Stage1,Stage2,Stage3
     phase_lrs: Optional[str] = None     # e.g. "2e-4,1e-4,5e-5" learning rates per phase
     stage3_base_lr_ratio: Optional[float] = None  # In Stage 3, base model gets lr*ratio (None = same lr for all)
+    # Cross-attention regularization
+    cross_attn_drop: float = 0.0  # Dropout in cross-attention layers (0.0 = disabled)
+    cross_attn_bottleneck: Optional[int] = None  # Bottleneck dim for cross-attn (None = no bottleneck)
 
 
 @dataclass
