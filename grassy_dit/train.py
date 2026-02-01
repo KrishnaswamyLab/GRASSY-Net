@@ -166,15 +166,67 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             if "hyperparameters" in checkpoint:
                 self._setup_diffusion_params(checkpoint)
             else:
-                print("Phase checkpoint detected - using config for diffusion params")
-                # Set essential diffusion params from config since checkpoint doesn't have them
-                model_cfg = self.config.get('model', {})
-                self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
-                self.input_dim_X = model_cfg.get('Xdim', 5)
-                self.input_dim_E = model_cfg.get('Edim', 4)
-                self.hidden_size = model_cfg.get('hidden_size', 1024)
-                self.num_layer = model_cfg.get('num_layer', 6)
-                self.num_head = model_cfg.get('num_head', 16)
+                print("Phase checkpoint detected - loading params from checkpoint")
+                
+                # First try: use model_dims if saved in checkpoint (new format)
+                if "model_dims" in checkpoint and checkpoint["model_dims"].get("max_n_nodes"):
+                    dims = checkpoint["model_dims"]
+                    self.max_node = dims["max_n_nodes"]
+                    self.input_dim_X = dims["Xdim"]
+                    self.input_dim_E = dims["Edim"]
+                    self.hidden_size = dims["hidden_size"]
+                    self.num_layer = dims["num_layer"]
+                    self.num_head = dims["num_head"]
+                    print(f"  Loaded dims: max_n={self.max_node}, Xdim={self.input_dim_X}, Edim={self.input_dim_E}")
+                else:
+                    # Fallback: infer dimensions from checkpoint's layer shapes
+                    print("  Inferring params from checkpoint layers...")
+                    state_dict = checkpoint.get("model_state_dict", checkpoint)
+                    
+                    # x_embedder.weight shape is [hidden_size, Xdim + max_n_nodes * Edim]
+                    x_emb_key = "denoiser.x_embedder.weight"
+                    if x_emb_key in state_dict:
+                        x_emb_shape = state_dict[x_emb_key].shape
+                        self.hidden_size = x_emb_shape[0]
+                        input_dim = x_emb_shape[1]  # Xdim + max_n_nodes * Edim
+                        
+                        # For molecular graphs: Edim is typically 4 (bond types)
+                        # Infer max_n_nodes and Xdim from input dimension
+                        # Standard ZINC: Edim=4, Xdim varies based on atom features
+                        # Try common Edim values and find one that gives integer max_n_nodes
+                        model_cfg = self.config.get('model', {})
+                        edim = model_cfg.get('Edim', 4)
+                        xdim = model_cfg.get('Xdim', 5)
+                        
+                        # Calculate max_n_nodes from input_dim = Xdim + max_n * Edim
+                        # Try to find integer solution
+                        for try_xdim in [xdim, 3, 5, 7, 9, 11]:
+                            if (input_dim - try_xdim) % edim == 0:
+                                max_n = (input_dim - try_xdim) // edim
+                                if max_n > 0 and max_n < 100:  # Sanity check
+                                    self.max_node = max_n
+                                    self.input_dim_X = try_xdim
+                                    self.input_dim_E = edim
+                                    print(f"  Inferred: max_n_nodes={max_n}, Xdim={try_xdim}, Edim={edim}")
+                                    break
+                        else:
+                            # Fallback: use config values
+                            print(f"  Warning: Could not infer dimensions, using config")
+                            self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
+                            self.input_dim_X = xdim
+                            self.input_dim_E = edim
+                    else:
+                        # Fallback to config values
+                        model_cfg = self.config.get('model', {})
+                        self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
+                        self.input_dim_X = model_cfg.get('Xdim', 5)
+                        self.input_dim_E = model_cfg.get('Edim', 4)
+                        self.hidden_size = model_cfg.get('hidden_size', 1024)
+                    
+                    # These can come from config
+                    model_cfg = self.config.get('model', {})
+                    self.num_layer = model_cfg.get('num_layer', 6)
+                    self.num_head = model_cfg.get('num_head', 16)
         
         model_cfg = self.config.get('model', {})
         aug_cfg = self.config.get('augmentation', {})
@@ -712,6 +764,15 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             "model_state_dict": self.model.state_dict(),
             "loss": loss,
             "config": self.config,
+            # Store dimensions for phase checkpoint compatibility
+            "model_dims": {
+                "max_n_nodes": getattr(self, 'max_node', None),
+                "Xdim": getattr(self, 'input_dim_X', None),
+                "Edim": getattr(self, 'input_dim_E', None),
+                "hidden_size": getattr(self, 'hidden_size', None),
+                "num_layer": getattr(self, 'num_layer', None),
+                "num_head": getattr(self, 'num_head', None),
+            }
         }
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(checkpoint, path)
