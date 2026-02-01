@@ -167,6 +167,14 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
                 self._setup_diffusion_params(checkpoint)
             else:
                 print("Phase checkpoint detected - using config for diffusion params")
+                # Set essential diffusion params from config since checkpoint doesn't have them
+                model_cfg = self.config.get('model', {})
+                self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
+                self.input_dim_X = model_cfg.get('Xdim', 5)
+                self.input_dim_E = model_cfg.get('Edim', 4)
+                self.hidden_size = model_cfg.get('hidden_size', 1024)
+                self.num_layer = model_cfg.get('num_layer', 6)
+                self.num_head = model_cfg.get('num_head', 16)
         
         model_cfg = self.config.get('model', {})
         aug_cfg = self.config.get('augmentation', {})
