@@ -184,54 +184,39 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
                     self.num_head = dims["num_head"]
                     print(f"  Loaded dims: max_n={self.max_node}, Xdim={self.input_dim_X}, Edim={self.input_dim_E}")
                 else:
-                    # Fallback: infer dimensions from checkpoint's layer shapes
-                    print("  Inferring params from checkpoint layers...")
-                    state_dict = checkpoint.get("model_state_dict", checkpoint)
+                    # Use config values for Xdim/Edim, compute max_n from checkpoint layer shape
+                    model_cfg = self.config.get('model', {})
                     
-                    # x_embedder.weight shape is [hidden_size, Xdim + max_n_nodes * Edim]
+                    # Edim=5 for molecular graphs (4 bond types + null/no-bond)
+                    # Xdim depends on dataset atom types (typically 9-14)
+                    self.input_dim_X = model_cfg.get('Xdim', 12)  # Default 12 for ZINC
+                    self.input_dim_E = model_cfg.get('Edim', 5)   # Default 5 (4 bonds + null)
+                    self.hidden_size = model_cfg.get('hidden_size', 1024)
+                    self.num_layer = model_cfg.get('num_layer', 6)
+                    self.num_head = model_cfg.get('num_head', 16)
+                    
+                    # Compute max_n_nodes from checkpoint layer shape
+                    state_dict = checkpoint.get("model_state_dict", checkpoint)
                     x_emb_key = "denoiser.x_embedder.weight"
                     if x_emb_key in state_dict:
                         x_emb_shape = state_dict[x_emb_key].shape
                         self.hidden_size = x_emb_shape[0]
                         input_dim = x_emb_shape[1]  # Xdim + max_n_nodes * Edim
                         
-                        # For molecular graphs: Edim is typically 4 (bond types)
-                        # Infer max_n_nodes and Xdim from input dimension
-                        # Standard ZINC: Edim=4, Xdim varies based on atom features
-                        # Try common Edim values and find one that gives integer max_n_nodes
-                        model_cfg = self.config.get('model', {})
-                        edim = model_cfg.get('Edim', 4)
-                        xdim = model_cfg.get('Xdim', 5)
-                        
-                        # Calculate max_n_nodes from input_dim = Xdim + max_n * Edim
-                        # Try to find integer solution
-                        for try_xdim in [xdim, 3, 5, 7, 9, 11]:
-                            if (input_dim - try_xdim) % edim == 0:
-                                max_n = (input_dim - try_xdim) // edim
-                                if max_n > 0 and max_n < 100:  # Sanity check
-                                    self.max_node = max_n
-                                    self.input_dim_X = try_xdim
-                                    self.input_dim_E = edim
-                                    print(f"  Inferred: max_n_nodes={max_n}, Xdim={try_xdim}, Edim={edim}")
-                                    break
+                        # Calculate: max_n = (input_dim - Xdim) / Edim
+                        remainder = (input_dim - self.input_dim_X) % self.input_dim_E
+                        if remainder == 0:
+                            self.max_node = (input_dim - self.input_dim_X) // self.input_dim_E
+                            print(f"  Computed: max_n_nodes={self.max_node}, Xdim={self.input_dim_X}, Edim={self.input_dim_E}")
                         else:
-                            # Fallback: use config values
-                            print(f"  Warning: Could not infer dimensions, using config")
+                            # Dimension mismatch - use config max_node if available
+                            print(f"  Warning: Dimension mismatch! input_dim={input_dim}, Xdim={self.input_dim_X}, Edim={self.input_dim_E}")
+                            print(f"  Please provide correct Xdim/Edim via --override dit.Xdim=N dit.Edim=M")
                             self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
-                            self.input_dim_X = xdim
-                            self.input_dim_E = edim
                     else:
-                        # Fallback to config values
-                        model_cfg = self.config.get('model', {})
+                        # No layer shape available, use config
                         self.max_node = model_cfg.get('max_n_nodes') or model_cfg.get('max_node', 38)
-                        self.input_dim_X = model_cfg.get('Xdim', 5)
-                        self.input_dim_E = model_cfg.get('Edim', 4)
-                        self.hidden_size = model_cfg.get('hidden_size', 1024)
-                    
-                    # These can come from config
-                    model_cfg = self.config.get('model', {})
-                    self.num_layer = model_cfg.get('num_layer', 6)
-                    self.num_head = model_cfg.get('num_head', 16)
+                        print(f"  Using config: max_n_nodes={self.max_node}, Xdim={self.input_dim_X}, Edim={self.input_dim_E}")
         
         model_cfg = self.config.get('model', {})
         aug_cfg = self.config.get('augmentation', {})
