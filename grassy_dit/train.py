@@ -316,15 +316,16 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         uniqueness = None
         vu_score = None
         
+        # Compute validity metrics for ALL stages (for logging/monitoring)
+        if current_epoch % self._gen_eval_every == 0:
+            validity, uniqueness, vu_score = self._compute_generation_metrics(n_samples=100)
+        
         if training_stage == 1:
             # ===== STAGE 1: Use V*U for checkpointing =====
-            if current_epoch % self._gen_eval_every == 0:
-                validity, uniqueness, vu_score = self._compute_generation_metrics(n_samples=100)
-                
-                if vu_score is not None and self.checkpoint_dir:
-                    if vu_score > self._best_vu_score:
-                        self._best_vu_score = vu_score
-                        self._save_best_checkpoint_vu(current_epoch, validity, uniqueness, vu_score)
+            if vu_score is not None and self.checkpoint_dir:
+                if vu_score > self._best_vu_score:
+                    self._best_vu_score = vu_score
+                    self._save_best_checkpoint_vu(current_epoch, validity, uniqueness, vu_score)
         else:
             # ===== STAGE 2 & 3: Use validation loss for checkpointing =====
             val_every = getattr(self, '_val_every_n_epochs', 1)
@@ -342,9 +343,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         # Logging
         loss_str = f"Epoch {current_epoch}/{self.epochs} - Train: {avg_train_loss:.6f}"
+        if vu_score is not None:
+            loss_str += f" - V:{validity:.1f}% U:{uniqueness:.1f}% V*U:{vu_score:.1f}"
         if training_stage == 1:
             if vu_score is not None:
-                loss_str += f" - V:{validity:.1f}% U:{uniqueness:.1f}% V*U:{vu_score:.1f}"
                 loss_str += f" - BestV*U: {self._best_vu_score:.1f}"
         else:
             if val_loss is not None:
@@ -355,11 +357,13 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         
         if wandb.run is not None:
             log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_train_loss": self._best_loss}
+            # Log validity metrics for ALL stages
+            if vu_score is not None:
+                log_dict["validity"] = validity
+                log_dict["uniqueness"] = uniqueness
+                log_dict["vu_score"] = vu_score
             if training_stage == 1:
                 if vu_score is not None:
-                    log_dict["validity"] = validity
-                    log_dict["uniqueness"] = uniqueness
-                    log_dict["vu_score"] = vu_score
                     log_dict["best_vu_score"] = self._best_vu_score
             else:
                 if val_loss is not None:
