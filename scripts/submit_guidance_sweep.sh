@@ -19,7 +19,7 @@ python -u -m guided_diffusion.sweep_guidance_scale \
     --num_samples 100 \
     --num_nodes 9 \
     --scales 0.0 0.05 0.1 0.2 0.5 1.0 \
-    --guidance_end_step 450
+    --guidance_end_step 490
 
 echo "Done!"
 date

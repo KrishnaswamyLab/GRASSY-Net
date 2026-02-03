@@ -126,22 +126,24 @@ def apply_guidance_to_probs(
     """
     Apply guidance gradient to probability distribution.
     
-    Converts probs to log-space, adds scaled gradient, then re-normalizes.
+    Works directly in probability space for correct gradient descent.
     
     Args:
         prob: [..., K] probability distribution (sums to 1 over last dim)
-        grad: [..., K] gradient to apply
+        grad: [..., K] gradient to apply (should be -∂loss/∂prob for minimization)
         scale: Guidance scale (higher = stronger guidance)
         eps: Small value for numerical stability
     
     Returns:
         guided_prob: [..., K] guided probability distribution
     """
-    # Add gradient to log-probabilities
-    log_prob = torch.log(prob.clamp(min=eps))
-    guided_log_prob = log_prob + scale * grad
+    # Apply gradient directly in probability space
+    guided_prob = prob + scale * grad
     
-    # Re-normalize via softmax
-    guided_prob = F.softmax(guided_log_prob, dim=-1)
+    # Ensure non-negative
+    guided_prob = guided_prob.clamp(min=eps)
+    
+    # Re-normalize to sum to 1
+    guided_prob = guided_prob / guided_prob.sum(dim=-1, keepdim=True)
     
     return guided_prob
