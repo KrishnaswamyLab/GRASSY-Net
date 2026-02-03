@@ -226,8 +226,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         training_stage = model_cfg.get('training_stage', 1)
         stage1_checkpoint = model_cfg.get('stage1_checkpoint', None)
         
-        # Check for moment tokens config
+        # Token configuration
         use_moment_tokens = model_cfg.get('use_moment_tokens', False)
+        use_level_tokens = model_cfg.get('use_level_tokens', True)
+        use_fixed_projections = model_cfg.get('use_fixed_projections', False)
         
         # Cross-attention dropout (helps prevent overfitting to scattering moments)
         cross_attn_drop = model_cfg.get('cross_attn_drop', 0.0)
@@ -248,6 +250,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             device=self.device,
             moment_noise_cfg=moment_noise_cfg,
             use_moment_tokens=use_moment_tokens,
+            use_level_tokens=use_level_tokens,
+            use_fixed_projections=use_fixed_projections,
             training_stage=training_stage,
             cross_attn_drop=cross_attn_drop,
             cross_attn_bottleneck=cross_attn_bottleneck,

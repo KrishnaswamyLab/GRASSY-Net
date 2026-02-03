@@ -1,8 +1,8 @@
 """
 GRASSY-DiT: GraphDiT with scattering moment conditioning.
 Extends torch-molecule by adding:
-1. ScatteringTokenizer: 440-D → [B, 21, D] dual tokens (atom + level)
-2. CrossAttention: graph attends to scattering
+1. ScatteringTokenizer: 440-D → [B, num_tokens, D] (atom + level + moment tokens)
+2. CrossAttention: graph attends to scattering (with optional bottleneck)
 3. SELayerWithCrossAttention: self-attn + cross-attn + MLP
 
 Scattering structure (from GRASSY):
@@ -11,10 +11,14 @@ Scattering structure (from GRASSY):
   Levels (11): 1 zeroth + 4 first-order + 6 second-order
   Moments (4): mean, variance, skew, kurtosis
   
-Dual tokenization:
-  - Atom tokens [10]: each = 44 dims (11 levels × 4 moments)
-  - Level tokens [11]: each = 40 dims (10 atoms × 4 moments)
-  - Same data, two views → overlap enables flexible querying
+Tokenization options:
+  - Atom tokens [A]: each = L*M dims → D via projection
+  - Level tokens [L] (optional): each = A*M dims → D via projection
+  - Moment tokens [M] (optional): each = A*L dims → D via projection
+  
+Projection options:
+  - use_fixed_projections=False: learned nn.Linear (default)
+  - use_fixed_projections=True: fixed orthogonal matrices (prevents overfitting)
 """
 import torch
 import torch.nn as nn
@@ -100,6 +104,9 @@ class ScatteringTokenizer(nn.Module):
     """
     Dual/Triple tokenization: 440-D scattering → [B, num_tokens, D]
     
+    Supports fixed orthogonal projections (non-learnable) to prevent overfitting.
+    Only positional embeddings and null embeddings are learned when use_fixed_projections=True.
+    
     Atom tokens: "What's each atom type's full scattering signature?"
     Level tokens: "What's happening at each scattering order/scale?"
     Moment tokens (optional): "What's the distribution shape across all atoms/levels?"
@@ -109,7 +116,7 @@ class ScatteringTokenizer(nn.Module):
     
     def __init__(self, hidden_size=384, num_atom_types=16, num_levels=11, 
              num_moments=4, dropout=0.1, moment_noise_cfg=None,
-             use_moment_tokens=False): 
+             use_moment_tokens=False, use_level_tokens=True, use_fixed_projections=False): 
         super().__init__()
         self.num_atom_types = num_atom_types
         self.num_levels = num_levels
@@ -117,27 +124,41 @@ class ScatteringTokenizer(nn.Module):
         self.dropout = dropout
         self.moment_noise_cfg = moment_noise_cfg or {}
         self.use_moment_tokens = use_moment_tokens
+        self.use_level_tokens = use_level_tokens
+        self.use_fixed_projections = use_fixed_projections
     
-        # Total tokens = atom tokens + level tokens (+ moment tokens if enabled)
-        self.num_tokens = num_atom_types + num_levels
+        # Total tokens = atom tokens + level tokens (optional) + moment tokens (optional)
+        self.num_tokens = num_atom_types
+        if use_level_tokens:
+            self.num_tokens += num_levels
         if use_moment_tokens:
             self.num_tokens += num_moments
         
-        # projecting the per atom tokens
-        self.atom_proj = nn.Linear(num_levels * num_moments, hidden_size)
+        # Projections: fixed orthogonal (non-learnable) or learned linear
+        if use_fixed_projections:
+            self.register_buffer('atom_proj', self._make_orthogonal_proj(num_levels * num_moments, hidden_size))
+            if use_level_tokens:
+                self.register_buffer('level_proj', self._make_orthogonal_proj(num_atom_types * num_moments, hidden_size))
+            if use_moment_tokens:
+                self.register_buffer('moment_proj', self._make_orthogonal_proj(num_atom_types * num_levels, hidden_size))
+        else:
+            self.atom_proj = nn.Linear(num_levels * num_moments, hidden_size)
+            if use_level_tokens:
+                self.level_proj = nn.Linear(num_atom_types * num_moments, hidden_size)
+            if use_moment_tokens:
+                self.moment_proj = nn.Linear(num_atom_types * num_levels, hidden_size)
         
-        # projecting the per level tokens
-        self.level_proj = nn.Linear(num_atom_types * num_moments, hidden_size)
-        
-        # projecting the per moment tokens (optional)
-        if use_moment_tokens:
-            self.moment_proj = nn.Linear(num_atom_types * num_levels, hidden_size)
-        
-        # Positional embeddings for all tokens
+        # Positional embeddings for all tokens (learned)
         self.pos = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
         
-        # Null embedding for CFG
+        # Null embedding for CFG (learned)
         self.null = nn.Parameter(torch.randn(1, self.num_tokens, hidden_size) * 0.02)
+    
+    def _make_orthogonal_proj(self, in_dim, out_dim):
+        """Create fixed orthogonal projection matrix [in_dim, out_dim] via QR decomposition."""
+        random = torch.randn(out_dim, in_dim)
+        q, _ = torch.linalg.qr(random)  # q: [out_dim, in_dim] with orthonormal columns
+        return q.T  # [in_dim, out_dim]
 
     def _apply_moment_noise(self, x):
         """Apply moment noise augmentation during training."""
@@ -190,21 +211,33 @@ class ScatteringTokenizer(nn.Module):
         
         # Atom tokens: [B, A, L*M] = [B, 10, 44] → [B, 10, D]
         atom_tokens = x.view(B, self.num_atom_types, -1)
-        atom_tokens = self.atom_proj(atom_tokens)
+        if self.use_fixed_projections:
+            atom_tokens = atom_tokens @ self.atom_proj
+        else:
+            atom_tokens = self.atom_proj(atom_tokens)
         
-        # Level tokens: [B, L, A*M] = [B, 11, 40] → [B, 11, D]
-        level_tokens = x.permute(0, 2, 1, 3).reshape(B, self.num_levels, -1)
-        level_tokens = self.level_proj(level_tokens)
+        token_list = [atom_tokens]
+        
+        # Level tokens (optional): [B, L, A*M] = [B, 11, 40] → [B, 11, D]
+        if self.use_level_tokens:
+            level_tokens = x.permute(0, 2, 1, 3).reshape(B, self.num_levels, -1)
+            if self.use_fixed_projections:
+                level_tokens = level_tokens @ self.level_proj
+            else:
+                level_tokens = self.level_proj(level_tokens)
+            token_list.append(level_tokens)
         
         # Moment tokens (optional): [B, M, A*L] = [B, 4, 110] → [B, 4, D]
         if self.use_moment_tokens:
             moment_tokens = x.permute(0, 3, 1, 2).reshape(B, self.num_moments, -1)
-            moment_tokens = self.moment_proj(moment_tokens)
-            # Concat: [B, A+L+M, D] = [B, 27, D]
-            tokens = torch.cat([atom_tokens, level_tokens, moment_tokens], dim=1)
-        else:
-            # Concat: [B, A+L, D] = [B, 23, D]
-            tokens = torch.cat([atom_tokens, level_tokens], dim=1)
+            if self.use_fixed_projections:
+                moment_tokens = moment_tokens @ self.moment_proj
+            else:
+                moment_tokens = self.moment_proj(moment_tokens)
+            token_list.append(moment_tokens)
+        
+        # Concatenate all tokens
+        tokens = torch.cat(token_list, dim=1)
         
         # Add positional embeddings
         tokens = tokens + self.pos
@@ -286,7 +319,8 @@ class ScatteringDenoiser(nn.Module):
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
                  mlp_ratio=4.0, Xdim=10, Edim=5, 
                  num_atom_types=16, num_levels=11, num_moments=4, device=None,
-                 moment_noise_cfg=None, use_moment_tokens=False, training_stage=1,
+                 moment_noise_cfg=None, use_moment_tokens=False, use_level_tokens=True,
+                 use_fixed_projections=False, training_stage=1,
                  cross_attn_drop=0.0, cross_attn_bottleneck=None):
         super().__init__()
         if device is None:
@@ -297,6 +331,8 @@ class ScatteringDenoiser(nn.Module):
         self.max_n_nodes = max_n_nodes
         self.hidden_size = hidden_size
         self.use_moment_tokens = use_moment_tokens
+        self.use_level_tokens = use_level_tokens
+        self.use_fixed_projections = use_fixed_projections
         self.training_stage = training_stage  # 1 = unconditional, 2 = cross-attention only
         self.cross_attn_drop = cross_attn_drop
         self.cross_attn_bottleneck = cross_attn_bottleneck
@@ -311,6 +347,8 @@ class ScatteringDenoiser(nn.Module):
             num_moments=num_moments,
             moment_noise_cfg=moment_noise_cfg,
             use_moment_tokens=use_moment_tokens,
+            use_level_tokens=use_level_tokens,
+            use_fixed_projections=use_fixed_projections,
         )
         
         # Transformer blocks (with cross-attention dropout and optional bottleneck)
