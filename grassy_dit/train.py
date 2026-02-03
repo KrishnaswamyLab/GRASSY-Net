@@ -114,7 +114,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             num_head=model_cfg.get('num_head', 16),
             # mlp_ratio=model_cfg.get('mlp_ratio', 4.0),
             # dropout=model_cfg.get('dropout', 0.1),
-            # drop_condition=model_cfg.get('drop_condition', 0.1),
+            drop_condition=model_cfg.get('drop_condition', 0.1),
             epochs=training_cfg.get('epochs', 100),
             batch_size=training_cfg.get('batch_size', 32),
             learning_rate=training_cfg.get('learning_rate', 1e-4),
