@@ -30,8 +30,10 @@ def main():
     parser.add_argument('--num_nodes', type=int, default=9,
                         help='Number of atoms per molecule')
     parser.add_argument('--scales', type=float, nargs='+',
-                        default=[0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1],
+                        default=[0.0, 0.05, 0.1, 0.2, 0.5, 1.0],
                         help='Guidance scales to test (0.0 = unguided baseline)')
+    parser.add_argument('--guidance_end_step', type=int, default=None,
+                        help='Step to stop guidance (None = guide until end, e.g. 450 stops 50 steps early)')
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to use')
     args = parser.parse_args()
@@ -44,6 +46,7 @@ def main():
     print(f"Num samples: {args.num_samples}")
     print(f"Num nodes: {args.num_nodes}")
     print(f"Scales: {args.scales}")
+    print(f"Guidance end step: {args.guidance_end_step} (None = guide all 500 steps)")
     print(f"Device: {args.device}")
     print("="*70 + "\n")
 
@@ -85,6 +88,7 @@ def main():
                 num_nodes=args.num_nodes,
                 batch_size=args.num_samples,
                 guidance_scale=scale,
+                guidance_end_step=args.guidance_end_step,
             )
         
         valid = [s for s in smiles if s is not None]

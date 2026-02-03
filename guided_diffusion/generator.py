@@ -183,6 +183,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         batch_size: int = 32,
         guidance_scale: float = 1.0,
         guidance_start_step: int = 0,
+        guidance_end_step: Optional[int] = None,
         num_atom_types: Optional[int] = None,
         J: int = 4,
         num_moments: int = 4,
@@ -206,6 +207,10 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         guidance_start_step : int, default=0
             Timestep index at which to start applying guidance. Can help
             stability by letting early steps establish structure first.
+        guidance_end_step : int, optional
+            Timestep index at which to stop applying guidance. If None, guidance
+            continues until the end. Setting this allows the model to "clean up"
+            invalid chemistry in final steps without guidance interference.
         num_atom_types : int, optional
             Number of atom type categories. If None, auto-detected from model's
             dataset_info. Falls back to 10 if not available.
@@ -250,6 +255,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._target_moments = target_moments
         self._guidance_scale = guidance_scale
         self._guidance_start_step = guidance_start_step
+        self._guidance_end_step = guidance_end_step  # None means guide until end
         self._current_step = 0
         
         # Convert num_nodes to tensor format expected by parent
@@ -269,6 +275,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             self._target_moments = None
             self._guidance_scale = 1.0
             self._guidance_start_step = 0
+            self._guidance_end_step = None
             self._current_step = 0
     
     def guided_generate_with_scaffold(
@@ -281,6 +288,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         batch_size: int = 32,
         guidance_scale: float = 1.0,
         guidance_start_step: int = 0,
+        guidance_end_step: Optional[int] = None,
         num_atom_types: Optional[int] = None,
         J: int = 4,
         num_moments: int = 4,
@@ -312,6 +320,8 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             Scale for scattering guidance gradients.
         guidance_start_step : int, default=0
             Timestep to start applying guidance.
+        guidance_end_step : int, optional
+            Timestep to stop applying guidance. If None, guide until end.
         num_atom_types : int, default=10
             Number of atom types.
         J : int, default=4
@@ -379,6 +389,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
                 batch_size=batch_size,
                 guidance_scale=guidance_scale,
                 guidance_start_step=guidance_start_step,
+                guidance_end_step=guidance_end_step,
                 num_atom_types=num_atom_types,
                 J=J,
                 num_moments=num_moments,
@@ -420,9 +431,15 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         pred_E = F.softmax(pred.E, dim=-1)  # [bs, n, n, d0]
         
         # ============== APPLY SCATTERING MOMENT GUIDANCE ==============
+        # Check if we're within the guidance window [start_step, end_step)
+        in_guidance_window = (
+            self._current_step >= self._guidance_start_step and
+            (self._guidance_end_step is None or self._current_step < self._guidance_end_step)
+        )
+        
         if (self._guidance is not None and 
             self._target_moments is not None and
-            self._current_step >= self._guidance_start_step):
+            in_guidance_window):
             
             # Compute guidance gradients
             with torch.enable_grad():
