@@ -168,6 +168,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._target_moments: Optional[torch.Tensor] = None
         self._guidance_scale: float = 1.0
         self._guidance_start_step: int = 0  # Step to start applying guidance
+        self._guidance_end_step: Optional[int] = None  # Step to stop guidance (None = guide until end)
         self._current_step: int = 0
         
         # Scaffold-specific attributes (set during guided_generate_with_scaffold)
