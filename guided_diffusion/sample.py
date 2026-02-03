@@ -198,8 +198,8 @@ def main():
                         help='Timestep to start applying guidance')
     
     # Scattering parameters
-    parser.add_argument('--num_atom_types', type=int, default=10,
-                        help='Number of atom types for scattering')
+    parser.add_argument('--num_atom_types', type=int, default=None,
+                        help='Number of atom types for scattering (auto-detected from model if not set)')
     parser.add_argument('--J', type=int, default=4,
                         help='Number of wavelet scales')
     parser.add_argument('--num_moments', type=int, default=4,
@@ -221,6 +221,15 @@ def main():
     print(f"\nLoading model from {args.checkpoint}...")
     model = load_graphdit_checkpoint(args.checkpoint, args.device)
     print("Model loaded successfully!")
+    
+    # Auto-detect num_atom_types from model if not provided
+    if args.num_atom_types is None:
+        if hasattr(model, 'dataset_info') and model.dataset_info:
+            atom_decoder = model.dataset_info.get('atom_decoder', [])
+            args.num_atom_types = len(atom_decoder) if atom_decoder else 10
+        else:
+            args.num_atom_types = 10
+        print(f"Auto-detected {args.num_atom_types} atom types")
     
     # Get target moments
     print("\nComputing target moments...")
@@ -264,8 +273,12 @@ def main():
     # Optionally compare with unguided generation
     if args.compare_unguided:
         print(f"\nGenerating {args.num_samples} unguided molecules for comparison...")
+        # Convert num_nodes to tensor for parent's generate
+        num_nodes_tensor = None
+        if args.num_nodes is not None:
+            num_nodes_tensor = torch.tensor([[args.num_nodes]] * args.num_samples, device=args.device)
         unguided_smiles = model.generate(
-            num_nodes=args.num_nodes,
+            num_nodes=num_nodes_tensor,
             batch_size=args.num_samples,
         )
         

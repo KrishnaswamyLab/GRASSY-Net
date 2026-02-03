@@ -270,24 +270,28 @@ def test_full_pipeline(checkpoint_path: str):
     print(f"\nTarget molecule: {target_smiles}")
     print(f"Generating {num_samples} samples with {num_nodes} nodes")
     
+    # Get num_atom_types from model
+    atom_decoder = model.dataset_info.get('atom_decoder', [])
+    num_atom_types = len(atom_decoder) if atom_decoder else 10
+    print(f"Detected {num_atom_types} atom types: {atom_decoder[:5]}...")
+    
     # Get target moments
     target_moments = get_target_moments(
         target_smiles=target_smiles,
-        num_atom_types=10,
+        num_atom_types=num_atom_types,
         J=4,
         num_moments=4,
         device=device
     )
     print(f"Target moments shape: {target_moments.shape}")
     
-    # Generate with guidance
+    # Generate with guidance (num_atom_types auto-detected from model)
     print("\nGenerating with guidance (scale=1.0)...")
     guided_smiles = model.guided_generate(
         target_moments=target_moments,
         num_nodes=num_nodes,
         batch_size=num_samples,
         guidance_scale=1.0,
-        num_atom_types=10,
         J=4,
         num_moments=4,
     )
@@ -297,14 +301,16 @@ def test_full_pipeline(checkpoint_path: str):
     
     if len(valid_guided) > 0:
         guided_distances = compute_moment_distances(
-            guided_smiles, target_moments, 10, 4, 4, device
+            guided_smiles, target_moments, num_atom_types, 4, 4, device
         )
         print(f"Guided mean distance: {guided_distances.mean():.4f}")
     
     # Generate without guidance
     print("\nGenerating without guidance...")
+    # Convert num_nodes to tensor for parent's generate
+    num_nodes_tensor = torch.tensor([[num_nodes]] * num_samples, device=device)
     unguided_smiles = model.generate(
-        num_nodes=num_nodes,
+        num_nodes=num_nodes_tensor,
         batch_size=num_samples,
     )
     
@@ -313,7 +319,7 @@ def test_full_pipeline(checkpoint_path: str):
     
     if len(valid_unguided) > 0:
         unguided_distances = compute_moment_distances(
-            unguided_smiles, target_moments, 10, 4, 4, device
+            unguided_smiles, target_moments, num_atom_types, 4, 4, device
         )
         print(f"Unguided mean distance: {unguided_distances.mean():.4f}")
     

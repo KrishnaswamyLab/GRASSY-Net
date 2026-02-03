@@ -183,7 +183,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         batch_size: int = 32,
         guidance_scale: float = 1.0,
         guidance_start_step: int = 0,
-        num_atom_types: int = 10,
+        num_atom_types: Optional[int] = None,
         J: int = 4,
         num_moments: int = 4,
         labels: Optional[Union[List, np.ndarray, torch.Tensor]] = None,
@@ -206,8 +206,9 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         guidance_start_step : int, default=0
             Timestep index at which to start applying guidance. Can help
             stability by letting early steps establish structure first.
-        num_atom_types : int, default=10
-            Number of atom type categories (must match scattering model).
+        num_atom_types : int, optional
+            Number of atom type categories. If None, auto-detected from model's
+            dataset_info. Falls back to 10 if not available.
         J : int, default=4
             Number of wavelet scales in scattering transform.
         num_moments : int, default=4
@@ -230,6 +231,13 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         
         target_moments = target_moments.to(self.device)
         
+        # Auto-detect num_atom_types from model if not explicitly set
+        if num_atom_types is None and hasattr(self, 'dataset_info') and self.dataset_info:
+            atom_decoder = self.dataset_info.get('atom_decoder', [])
+            num_atom_types = len(atom_decoder) if atom_decoder else 10
+        elif num_atom_types is None:
+            num_atom_types = 10  # fallback default
+        
         # Initialize guidance module
         self._guidance = ScatteringMomentGuidance(
             num_atom_types=num_atom_types,
@@ -243,6 +251,10 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._guidance_scale = guidance_scale
         self._guidance_start_step = guidance_start_step
         self._current_step = 0
+        
+        # Convert num_nodes to tensor format expected by parent
+        if num_nodes is not None and isinstance(num_nodes, int):
+            num_nodes = torch.tensor([[num_nodes]] * batch_size, device=self.device)
         
         try:
             # Call parent generate - our overridden sample_p_zs_given_zt will apply guidance
@@ -269,7 +281,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         batch_size: int = 32,
         guidance_scale: float = 1.0,
         guidance_start_step: int = 0,
-        num_atom_types: int = 10,
+        num_atom_types: Optional[int] = None,
         J: int = 4,
         num_moments: int = 4,
         labels: Optional[Union[List, np.ndarray, torch.Tensor]] = None,
