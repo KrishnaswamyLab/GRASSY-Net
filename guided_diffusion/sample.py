@@ -70,6 +70,7 @@ def get_target_moments(
     J: int = 4,
     num_moments: int = 4,
     device: str = "cuda",
+    model_atom_decoder: Optional[List[str]] = None,
 ) -> torch.Tensor:
     """
     Get target scattering moments from SMILES or file.
@@ -82,18 +83,24 @@ def get_target_moments(
         J: Number of wavelet scales
         num_moments: Number of statistical moments
         device: Device for computation
+        model_atom_decoder: Atom type list from model (e.g. ['C', 'N', 'O', 'F'])
     
     Returns:
         Target moments tensor [D]
     """
     if target_smiles is not None:
+        # Use model's atom decoder if provided, otherwise fallback to generic list
+        if model_atom_decoder is not None:
+            atom_types = model_atom_decoder
+            num_atom_types = len(atom_types)
+        else:
+            atom_types = ["C", "N", "O", "S", "F", "Cl", "Br", "I", "P", "B"][:num_atom_types]
+        
         # Compute from SMILES
         scattering_model = GraphScatteringTransform(
             in_channels=num_atom_types, J=J, num_moments=num_moments
         ).to(device)
         scattering_model.eval()
-        
-        atom_types = ["C", "N", "O", "S", "F", "Cl", "Br", "I", "P", "B"][:num_atom_types]
         
         moments = compute_scattering_from_smiles(
             [target_smiles], scattering_model, atom_types, device
@@ -125,6 +132,7 @@ def compute_moment_distances(
     J: int = 4,
     num_moments: int = 4,
     device: str = "cuda",
+    model_atom_decoder: Optional[List[str]] = None,
 ) -> np.ndarray:
     """
     Compute MSE distances between generated molecules and target moments.
@@ -136,16 +144,22 @@ def compute_moment_distances(
         J: Number of wavelet scales
         num_moments: Number of statistical moments
         device: Device for computation
+        model_atom_decoder: Atom type list from model (e.g. ['C', 'N', 'O', 'F'])
     
     Returns:
         Array of MSE distances [N]
     """
+    # Use model's atom decoder if provided, otherwise fallback
+    if model_atom_decoder is not None:
+        atom_types = model_atom_decoder
+        num_atom_types = len(atom_types)
+    else:
+        atom_types = ["C", "N", "O", "S", "F", "Cl", "Br", "I", "P", "B"][:num_atom_types]
+    
     scattering_model = GraphScatteringTransform(
         in_channels=num_atom_types, J=J, num_moments=num_moments
     ).to(device)
     scattering_model.eval()
-    
-    atom_types = ["C", "N", "O", "S", "F", "Cl", "Br", "I", "P", "B"][:num_atom_types]
     
     # Filter valid SMILES
     valid_smiles = [s for s in smiles_list if s is not None]
@@ -222,14 +236,18 @@ def main():
     model = load_graphdit_checkpoint(args.checkpoint, args.device)
     print("Model loaded successfully!")
     
-    # Auto-detect num_atom_types from model if not provided
-    if args.num_atom_types is None:
-        if hasattr(model, 'dataset_info') and model.dataset_info:
-            atom_decoder = model.dataset_info.get('atom_decoder', [])
-            args.num_atom_types = len(atom_decoder) if atom_decoder else 10
-        else:
+    # Auto-detect atom types from model
+    atom_decoder = None
+    if hasattr(model, 'dataset_info') and model.dataset_info:
+        atom_decoder = model.dataset_info.get('atom_decoder', None)
+        if atom_decoder:
+            args.num_atom_types = len(atom_decoder)
+            print(f"Auto-detected {args.num_atom_types} atom types: {atom_decoder}")
+    
+    if atom_decoder is None:
+        if args.num_atom_types is None:
             args.num_atom_types = 10
-        print(f"Auto-detected {args.num_atom_types} atom types")
+        print(f"Using fallback: {args.num_atom_types} atom types")
     
     # Get target moments
     print("\nComputing target moments...")
@@ -241,6 +259,7 @@ def main():
         J=args.J,
         num_moments=args.num_moments,
         device=args.device,
+        model_atom_decoder=atom_decoder,
     )
     print(f"Target moments shape: {target_moments.shape}")
     
@@ -263,7 +282,8 @@ def main():
     # Compute moment distances for guided samples
     guided_distances = compute_moment_distances(
         guided_smiles, target_moments,
-        args.num_atom_types, args.J, args.num_moments, args.device
+        args.num_atom_types, args.J, args.num_moments, args.device,
+        model_atom_decoder=atom_decoder,
     )
     
     if len(guided_distances) > 0:
@@ -287,7 +307,8 @@ def main():
         
         unguided_distances = compute_moment_distances(
             unguided_smiles, target_moments,
-            args.num_atom_types, args.J, args.num_moments, args.device
+            args.num_atom_types, args.J, args.num_moments, args.device,
+            model_atom_decoder=atom_decoder,
         )
         
         if len(unguided_distances) > 0:

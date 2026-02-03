@@ -275,13 +275,14 @@ def test_full_pipeline(checkpoint_path: str):
     num_atom_types = len(atom_decoder) if atom_decoder else 10
     print(f"Detected {num_atom_types} atom types: {atom_decoder[:5]}...")
     
-    # Get target moments
+    # Get target moments (use model's atom decoder for correct scattering)
     target_moments = get_target_moments(
         target_smiles=target_smiles,
         num_atom_types=num_atom_types,
         J=4,
         num_moments=4,
-        device=device
+        device=device,
+        model_atom_decoder=atom_decoder if atom_decoder else None,
     )
     print(f"Target moments shape: {target_moments.shape}")
     
@@ -301,7 +302,8 @@ def test_full_pipeline(checkpoint_path: str):
     
     if len(valid_guided) > 0:
         guided_distances = compute_moment_distances(
-            guided_smiles, target_moments, num_atom_types, 4, 4, device
+            guided_smiles, target_moments, num_atom_types, 4, 4, device,
+            model_atom_decoder=atom_decoder if atom_decoder else None,
         )
         print(f"Guided mean distance: {guided_distances.mean():.4f}")
     
@@ -319,7 +321,8 @@ def test_full_pipeline(checkpoint_path: str):
     
     if len(valid_unguided) > 0:
         unguided_distances = compute_moment_distances(
-            unguided_smiles, target_moments, num_atom_types, 4, 4, device
+            unguided_smiles, target_moments, num_atom_types, 4, 4, device,
+            model_atom_decoder=atom_decoder if atom_decoder else None,
         )
         print(f"Unguided mean distance: {unguided_distances.mean():.4f}")
     
