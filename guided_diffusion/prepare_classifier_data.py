@@ -6,10 +6,10 @@ by applying noise at various timesteps to clean molecular graphs.
 
 Usage:
     python -m guided_diffusion.prepare_classifier_data \
-        --data_dir grassy_dit/data \
+        --dit_checkpoint runs/graphdit_qm9_43996065/graphdit_final.pt \
+        --data_dir data/qm9_classifier \
         --output_dir guided_diffusion/classifier_data \
-        --num_timesteps_per_mol 10 \
-        --max_samples 10000
+        --num_timesteps_per_mol 10
 """
 
 import argparse
@@ -31,52 +31,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from torch_molecule import GraphDITMolecularGenerator
 from torch_molecule.generator.graph_dit.utils import to_dense
 from rdkit import Chem
-
-
-class NoiseApplicator(GraphDITMolecularGenerator):
-    """
-    Minimal wrapper to access apply_noise() from GraphDITMolecularGenerator.
-    
-    We inherit from GraphDITMolecularGenerator to get access to:
-    - apply_noise(): Adds discrete noise to graphs at specified timesteps
-    - _convert_to_pytorch_data(): Converts SMILES to PyG format
-    - transition_model, noise_schedule: Required for apply_noise
-    """
-    
-    def __init__(self, max_node=50, Xdim=10, Edim=5):
-        # Initialize with minimal config - we only need noise application
-        super().__init__(
-            hidden_size=256,  # Doesn't matter, we won't use the model
-            num_layer=2,
-            num_head=4,
-            epochs=1,
-            batch_size=32,
-        )
-        self.max_node = max_node
-        self.input_dim_X = Xdim
-        self.input_dim_E = Edim
-        
-    def setup_for_data(self, smiles_list, scattering):
-        """
-        Initialize internal state needed for apply_noise().
-        
-        This calls the parent's data processing to set up:
-        - dataset_info (atom types, etc.)
-        - transition_model
-        - noise_schedule
-        """
-        # Don't pass scattering to _validate_inputs (it expects task labels)
-        # Pass None for y, we'll handle scattering separately
-        X, _ = self._validate_inputs(smiles_list, None)
-        
-        # Convert to PyG data (without properties)
-        self._dataset = self._convert_to_pytorch_data(X, None)
-        
-        # Store scattering separately - we'll use it as labels
-        self._scattering = torch.tensor(scattering, dtype=torch.float32)
-        
-        # Now we have everything needed for apply_noise()
-        return self._dataset
 
 
 def load_molecular_data(data_dir, csv_file='molecules.csv', scatter_file='scattering_moments.npy',
@@ -124,6 +78,7 @@ def load_molecular_data(data_dir, csv_file='molecules.csv', scatter_file='scatte
 
 
 def prepare_classifier_dataset(
+    dit_checkpoint: str,
     data_dir: str,
     output_dir: str,
     num_timesteps_per_mol: int = 10,
@@ -136,13 +91,10 @@ def prepare_classifier_dataset(
     """
     Prepare classifier training data by generating noisy graphs at various timesteps.
     
-    For each molecule:
-    1. Load clean graph and scattering moments
-    2. Sample K random timesteps
-    3. Apply noise at each timestep using DiT's apply_noise()
-    4. Save (noisy_X, noisy_E, t, node_mask, clean_moments)
+    Uses a trained DiT checkpoint to get properly configured noise infrastructure.
     
     Args:
+        dit_checkpoint: Path to trained DiT checkpoint
         data_dir: Directory with molecules.csv and scattering_moments.npy
         output_dir: Where to save the prepared dataset
         num_timesteps_per_mol: Number of timesteps to sample per molecule
@@ -154,47 +106,36 @@ def prepare_classifier_dataset(
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f"Loading data from {data_dir}...")
+    # Load the trained DiT to get properly configured infrastructure
+    print(f"Loading DiT from {dit_checkpoint}...")
+    dit = GraphDITMolecularGenerator()
+    dit.load_from_local(dit_checkpoint)
+    
+    # Get dataset info from the trained model
+    dataset_info = dit.dataset_info
+    active_index = dataset_info["active_index"]
+    max_node = dit.max_node
+    timesteps = dit.timesteps
+    input_dim_X = dit.input_dim_X
+    input_dim_E = dit.input_dim_E
+    
+    print(f"DiT config: max_node={max_node}, timesteps={timesteps}, Xdim={input_dim_X}, Edim={input_dim_E}")
+    print(f"Active atom indices: {len(active_index)}")
+    
+    # Load molecular data
+    print(f"\nLoading data from {data_dir}...")
     smiles, scattering = load_molecular_data(
         data_dir, csv_file, scatter_file, smiles_col, max_samples
     )
     print(f"Loaded {len(smiles)} molecules")
     print(f"Scattering dimension: {scattering.shape[-1]}")
     
-    # Infer dimensions from scattering
-    # scattering_dim = num_atom_types * num_levels * num_moments
-    # Default: J=4 -> num_levels = 1 + 4 + 6 = 11, num_moments = 4
-    scattering_dim = scattering.shape[-1]
-    J = 4
-    num_levels = 1 + J + J * (J - 1) // 2  # 11 for J=4
-    num_moments = 4
-    num_atom_types = scattering_dim // (num_levels * num_moments)
+    scattering_tensor = torch.tensor(scattering, dtype=torch.float32)
     
-    print(f"Inferred num_atom_types: {num_atom_types}")
-    
-    # Initialize noise applicator
-    # We need to determine max_node from the data
-    max_atoms = 0
-    for smi in smiles[:1000]:  # Sample to estimate
-        mol = Chem.MolFromSmiles(smi)
-        if mol:
-            max_atoms = max(max_atoms, mol.GetNumAtoms())
-    max_node = min(max_atoms + 10, 50)  # Add buffer, cap at 50
-    print(f"Using max_node: {max_node}")
-    
-    noise_applicator = NoiseApplicator(max_node=max_node, Xdim=num_atom_types, Edim=5)
-    
-    # Set up data processing
-    print("Setting up noise applicator...")
-    dataset = noise_applicator.setup_for_data(smiles, scattering)
-    
-    # Get dataset info
-    dataset_info = noise_applicator.dataset_info
-    active_index = dataset_info["active_index"]
-    timesteps = noise_applicator.timesteps
-    
-    print(f"Timesteps: {timesteps}")
-    print(f"Active atom indices: {len(active_index)}")
+    # Convert SMILES to PyG dataset using DiT's method
+    print("Converting SMILES to PyG format...")
+    X_validated, _ = dit._validate_inputs(smiles, None)
+    dataset = dit._convert_to_pytorch_data(X_validated, None)
     
     # Create dataloader
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -209,8 +150,8 @@ def prepare_classifier_dataset(
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Move noise applicator components to device
-    noise_applicator.transition_model = noise_applicator.transition_model.to(device)
+    # Move DiT components to device
+    dit.transition_model = dit.transition_model.to(device)
     
     print(f"\nGenerating noisy samples ({num_timesteps_per_mol} timesteps per molecule)...")
     
@@ -227,20 +168,17 @@ def prepare_classifier_dataset(
         dense_data = dense_data.mask(node_mask)
         X, E = dense_data.X, dense_data.E  # [B, N, Xdim], [B, N, N, Edim]
         
-        # Clean scattering moments for this batch (from stored scattering, not batched_data.y)
-        start_idx = batch_idx * batch_size
-        end_idx = min(start_idx + B, len(noise_applicator._scattering))
-        clean_moments = noise_applicator._scattering[start_idx:end_idx].to(device)
-        
         B = X.shape[0]
+        
+        # Get clean scattering moments for this batch
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + B, len(scattering_tensor))
+        clean_moments = scattering_tensor[start_idx:end_idx].to(device)
         
         # Sample multiple timesteps for each molecule in batch
         for _ in range(num_timesteps_per_mol):
-            # Sample random timesteps for each molecule
-            t_int = torch.randint(0, timesteps, (B,), device=device)
-            
-            # Apply noise
-            noisy_data = noise_applicator.apply_noise(X, E, clean_moments, node_mask)
+            # Apply noise using DiT's method (samples random timesteps internally)
+            noisy_data = dit.apply_noise(X, E, clean_moments, node_mask)
             
             # Store results
             all_noisy_X.append(noisy_data['X_t'].cpu())
@@ -275,12 +213,13 @@ def prepare_classifier_dataset(
         'metadata': {
             'num_samples': noisy_X.shape[0],
             'max_node': max_node,
-            'Xdim': num_atom_types,
-            'Edim': 5,
-            'moment_dim': scattering_dim,
+            'Xdim': input_dim_X,
+            'Edim': input_dim_E,
+            'moment_dim': scattering.shape[-1],
             'num_timesteps': timesteps,
             'num_timesteps_per_mol': num_timesteps_per_mol,
             'source_data_dir': data_dir,
+            'dit_checkpoint': dit_checkpoint,
         }
     }, os.path.join(output_dir, 'classifier_training_data.pt'))
     
@@ -289,9 +228,9 @@ def prepare_classifier_dataset(
     return {
         'num_samples': noisy_X.shape[0],
         'max_node': max_node,
-        'Xdim': num_atom_types,
-        'Edim': 5,
-        'moment_dim': scattering_dim,
+        'Xdim': input_dim_X,
+        'Edim': input_dim_E,
+        'moment_dim': scattering.shape[-1],
     }
 
 
@@ -361,6 +300,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
+    parser.add_argument('--dit_checkpoint', type=str, required=True,
+                        help='Path to trained DiT checkpoint')
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Directory containing molecules.csv and scattering_moments.npy')
     parser.add_argument('--output_dir', type=str, default='guided_diffusion/classifier_data',
@@ -381,6 +322,7 @@ def main():
     args = parser.parse_args()
     
     prepare_classifier_dataset(
+        dit_checkpoint=args.dit_checkpoint,
         data_dir=args.data_dir,
         output_dir=args.output_dir,
         num_timesteps_per_mol=args.num_timesteps_per_mol,
