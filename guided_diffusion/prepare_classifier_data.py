@@ -65,11 +65,15 @@ class NoiseApplicator(GraphDITMolecularGenerator):
         - transition_model
         - noise_schedule
         """
-        # Use parent's validation to set up dataset info
-        X, y = self._validate_inputs(smiles_list, scattering)
+        # Don't pass scattering to _validate_inputs (it expects task labels)
+        # Pass None for y, we'll handle scattering separately
+        X, _ = self._validate_inputs(smiles_list, None)
         
-        # Convert to PyG data to trigger dataset_info setup
-        self._dataset = self._convert_to_pytorch_data(X, y)
+        # Convert to PyG data (without properties)
+        self._dataset = self._convert_to_pytorch_data(X, None)
+        
+        # Store scattering separately - we'll use it as labels
+        self._scattering = torch.tensor(scattering, dtype=torch.float32)
         
         # Now we have everything needed for apply_noise()
         return self._dataset
@@ -223,8 +227,10 @@ def prepare_classifier_dataset(
         dense_data = dense_data.mask(node_mask)
         X, E = dense_data.X, dense_data.E  # [B, N, Xdim], [B, N, N, Edim]
         
-        # Clean scattering moments for this batch
-        clean_moments = batched_data.y  # [B, moment_dim]
+        # Clean scattering moments for this batch (from stored scattering, not batched_data.y)
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + B, len(noise_applicator._scattering))
+        clean_moments = noise_applicator._scattering[start_idx:end_idx].to(device)
         
         B = X.shape[0]
         
