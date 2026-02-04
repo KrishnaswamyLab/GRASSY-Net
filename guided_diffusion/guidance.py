@@ -8,7 +8,11 @@ import torch
 import torch.nn.functional as F
 from typing import Tuple, Optional
 
-from .soft_scattering import DenseSoftScattering
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from grassy_dit.soft_scattering import DenseSoftScattering
 
 
 class ScatteringMomentGuidance:

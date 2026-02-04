@@ -32,7 +32,7 @@ def test_soft_scattering_differentiable():
     print("Test 1: DenseSoftScattering differentiability")
     print("="*60)
     
-    from guided_diffusion.soft_scattering import DenseSoftScattering
+    from grassy_dit.soft_scattering import DenseSoftScattering
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
