@@ -431,6 +431,30 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         pred_X = F.softmax(pred.X, dim=-1)  # [bs, n, d0]
         pred_E = F.softmax(pred.E, dim=-1)  # [bs, n, n, d0]
         
+        # ============== APPLY SCATTERING MOMENT GUIDANCE ==============
+        # Guide predictions BEFORE computing posterior (original approach)
+        in_guidance_window = (
+            self._current_step >= self._guidance_start_step and
+            (self._guidance_end_step is None or self._current_step < self._guidance_end_step)
+        )
+        
+        if (self._guidance is not None and 
+            self._target_moments is not None and
+            in_guidance_window):
+            
+            # Compute guidance gradients from predictions
+            with torch.enable_grad():
+                grad_X, grad_E = self._guidance.compute_guidance(
+                    pred_X, pred_E, node_mask, self._target_moments
+                )
+            
+            # Apply guidance to predictions (then posterior computed from guided pred)
+            pred_X = apply_guidance_to_probs(pred_X, grad_X, self._guidance_scale)
+            pred_E = apply_guidance_to_probs(pred_E, grad_E, self._guidance_scale)
+        
+        self._current_step += 1
+        # ==============================================================
+        
         # Retrieve transition matrices
         device = pred_X.device
         Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device)
@@ -493,30 +517,6 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             )
             prob_X = prob_X / prob_X.sum(dim=-1, keepdim=True).clamp_min(1e-5)
             prob_E = prob_E / prob_E.sum(dim=-1, keepdim=True).clamp_min(1e-5)
-        
-        # ============== APPLY SCATTERING MOMENT GUIDANCE ==============
-        # Compute gradient from PREDICTIONS (clean graph), apply to POSTERIOR (sampling)
-        in_guidance_window = (
-            self._current_step >= self._guidance_start_step and
-            (self._guidance_end_step is None or self._current_step < self._guidance_end_step)
-        )
-        
-        if (self._guidance is not None and 
-            self._target_moments is not None and
-            in_guidance_window):
-            
-            # Compute guidance gradients from PREDICTIONS (model's clean graph estimate)
-            with torch.enable_grad():
-                grad_X, grad_E = self._guidance.compute_guidance(
-                    pred_X, pred_E, node_mask, self._target_moments
-                )
-            
-            # Apply guidance to POSTERIOR (directly affects sampling)
-            prob_X = apply_guidance_to_probs(prob_X, grad_X, self._guidance_scale)
-            prob_E = apply_guidance_to_probs(prob_E, grad_E, self._guidance_scale)
-        
-        self._current_step += 1
-        # ==============================================================
         
         # Sample next state
         if self._guidance is not None:
