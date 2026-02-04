@@ -150,8 +150,8 @@ def prepare_classifier_dataset(
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Move DiT components to device
-    dit.transition_model = dit.transition_model.to(device)
+    # Move DiT model to device
+    dit.model = dit.model.to(device)
     
     print(f"\nGenerating noisy samples ({num_timesteps_per_mol} timesteps per molecule)...")
     
