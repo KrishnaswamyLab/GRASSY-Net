@@ -495,7 +495,7 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             prob_E = prob_E / prob_E.sum(dim=-1, keepdim=True).clamp_min(1e-5)
         
         # ============== APPLY SCATTERING MOMENT GUIDANCE ==============
-        # Apply guidance to posterior (what actually gets sampled)
+        # Compute gradient from PREDICTIONS (clean graph), apply to POSTERIOR (sampling)
         in_guidance_window = (
             self._current_step >= self._guidance_start_step and
             (self._guidance_end_step is None or self._current_step < self._guidance_end_step)
@@ -505,13 +505,13 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             self._target_moments is not None and
             in_guidance_window):
             
-            # Compute guidance gradients from posterior probabilities
+            # Compute guidance gradients from PREDICTIONS (model's clean graph estimate)
             with torch.enable_grad():
                 grad_X, grad_E = self._guidance.compute_guidance(
-                    prob_X, prob_E, node_mask, self._target_moments
+                    pred_X, pred_E, node_mask, self._target_moments
                 )
             
-            # Apply guidance by shifting posterior
+            # Apply guidance to POSTERIOR (directly affects sampling)
             prob_X = apply_guidance_to_probs(prob_X, grad_X, self._guidance_scale)
             prob_E = apply_guidance_to_probs(prob_E, grad_E, self._guidance_scale)
         
