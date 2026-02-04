@@ -99,8 +99,8 @@ def train_epoch(
     
     for batch_idx, (noisy_X, noisy_E, t, node_mask, clean_moments) in enumerate(pbar):
         # Move to device
-        noisy_X = noisy_X.to(device)
-        noisy_E = noisy_E.to(device)
+        noisy_X = noisy_X.to(device).float()
+        noisy_E = noisy_E.to(device).float()
         t = t.to(device)
         node_mask = node_mask.to(device)
         clean_moments = clean_moments.to(device)
@@ -124,14 +124,14 @@ def train_epoch(
         total_loss += loss.item()
         num_batches += 1
         
-        # Track per-bucket loss
-        buckets = compute_timestep_buckets(t, num_timesteps)
-        with torch.no_grad():
-            per_sample_loss = ((pred_moments - clean_moments) ** 2).mean(dim=-1)
-            for b in range(3):
-                mask = buckets == b
-                if mask.any():
-                    bucket_losses[b].append(per_sample_loss[mask].mean().item())
+        # Track per-bucket loss (disabled - tensor indexing issue)
+        # buckets = compute_timestep_buckets(t, num_timesteps)
+        # with torch.no_grad():
+        #     per_sample_loss = ((pred_moments - clean_moments) ** 2).mean(dim=-1)
+        #     for b in range(3):
+        #         mask = buckets == b
+        #         if mask.any():
+        #             bucket_losses[b].append(per_sample_loss[mask].mean().item())
         
         # Update progress bar
         pbar.set_postfix({'loss': loss.item()})
@@ -182,8 +182,8 @@ def validate(
     bucket_names = ['early', 'mid', 'late']
     
     for noisy_X, noisy_E, t, node_mask, clean_moments in dataloader:
-        noisy_X = noisy_X.to(device)
-        noisy_E = noisy_E.to(device)
+        noisy_X = noisy_X.to(device).float()
+        noisy_E = noisy_E.to(device).float()
         t = t.to(device)
         node_mask = node_mask.to(device)
         clean_moments = clean_moments.to(device)
@@ -194,13 +194,13 @@ def validate(
         total_loss += loss.item()
         num_batches += 1
         
-        # Per-bucket tracking
-        buckets = compute_timestep_buckets(t, num_timesteps)
-        per_sample_loss = ((pred_moments - clean_moments) ** 2).mean(dim=-1)
-        for b in range(3):
-            mask = buckets == b
-            if mask.any():
-                bucket_losses[b].append(per_sample_loss[mask].mean().item())
+        # Per-bucket tracking (disabled - tensor indexing issue)
+        # buckets = compute_timestep_buckets(t, num_timesteps)
+        # per_sample_loss = ((pred_moments - clean_moments) ** 2).mean(dim=-1)
+        # for b in range(3):
+        #     mask = buckets == b
+        #     if mask.any():
+        #         bucket_losses[b].append(per_sample_loss[mask].mean().item())
     
     avg_loss = total_loss / num_batches
     
