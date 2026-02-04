@@ -519,10 +519,22 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             prob_E = prob_E / prob_E.sum(dim=-1, keepdim=True).clamp_min(1e-5)
         
         # Sample next state
-        sampled_s = sample_discrete_features(prob_X, prob_E, node_mask=node_mask)
-        
-        X_s = F.one_hot(sampled_s.X, num_classes=self.input_dim_X).to(self.device).float()
-        E_s = F.one_hot(sampled_s.E, num_classes=self.input_dim_E).to(self.device).float()
+        if self._guidance is not None:
+            # Gumbel-softmax: hard one-hot forward, soft gradients backward
+            logits_X = torch.log(prob_X.clamp(min=1e-8))
+            logits_E = torch.log(prob_E.clamp(min=1e-8))
+            X_s = F.gumbel_softmax(logits_X, tau=0.5, hard=True, dim=-1)
+            E_s = F.gumbel_softmax(logits_E, tau=0.5, hard=True, dim=-1)
+            # Enforce edge symmetry (take upper triangular, mirror)
+            E_idx = E_s.argmax(dim=-1)
+            E_idx = torch.triu(E_idx, diagonal=1)
+            E_idx = E_idx + E_idx.transpose(1, 2)
+            E_s = F.one_hot(E_idx, num_classes=self.input_dim_E).float()
+        else:
+            # Standard sampling
+            sampled_s = sample_discrete_features(prob_X, prob_E, node_mask=node_mask)
+            X_s = F.one_hot(sampled_s.X, num_classes=self.input_dim_X).to(self.device).float()
+            E_s = F.one_hot(sampled_s.E, num_classes=self.input_dim_E).to(self.device).float()
         
         # ============== INJECT SCAFFOLD CONSTRAINTS ==============
         if self._scaffold_X is not None and self._scaffold_mask is not None:
