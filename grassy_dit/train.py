@@ -31,10 +31,11 @@ from typing import Dict, Any
 class ScatteringTransformerAdapter(torch.nn.Module):
     """Wraps ScatteringDenoiser to match Transformer.forward(noisy_data, unconditioned) signature."""
     
-    def __init__(self, denoiser):
+    def __init__(self, denoiser, l1_lambda=0.0):
         super().__init__()
         self.denoiser = denoiser
         self.step = 0  # Track training step for Wandb logging
+        self.l1_lambda = l1_lambda  # L1 regularization on cross-attention weights
     
     def forward(self, noisy_data, unconditioned):
         X_t = noisy_data['X_t'].float()
@@ -68,7 +69,18 @@ class ScatteringTransformerAdapter(torch.nn.Module):
 
         loss_X = F.cross_entropy(flat_pred_X, torch.argmax(flat_true_X, dim=-1)) if true_X.numel() > 0 else 0.0
         loss_E = F.cross_entropy(flat_pred_E, torch.argmax(flat_true_E, dim=-1)) if true_E.numel() > 0 else 0.0
-        loss = lw_X * loss_X + lw_E * loss_E
+        base_loss = lw_X * loss_X + lw_E * loss_E
+        
+        # L1 regularization on cross-attention and scattering-related weights only
+        l1_penalty = 0.0
+        if self.l1_lambda > 0:
+            for name, param in self.denoiser.named_parameters():
+                # Target cross-attention, scattering tokenizer, and SE layers (scattering-enhanced)
+                if any(key in name.lower() for key in ['cross_attn', 'scattering', 'se_layer']):
+                    l1_penalty += param.abs().sum()
+            loss = base_loss + self.l1_lambda * l1_penalty
+        else:
+            loss = base_loss
         
         # Log to Wandb
         if isinstance(loss_X, torch.Tensor):
@@ -84,12 +96,15 @@ class ScatteringTransformerAdapter(torch.nn.Module):
         else:
             loss_val = loss
         
-        wandb.log({
+        log_dict = {
             "train_loss": loss_val,
             "train_loss_X": loss_X_val,
             "train_loss_E": loss_E_val,
             "step": self.step
-        })
+        }
+        if self.l1_lambda > 0:
+            log_dict["train_l1_penalty"] = l1_penalty.item() if isinstance(l1_penalty, torch.Tensor) else l1_penalty
+        wandb.log(log_dict)
         self.step += 1
         
         return loss, loss_X, loss_E
@@ -131,6 +146,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         # Stage 3 differential LR (optional): base model gets lr*ratio, cross-attn gets lr
         self._stage3_base_lr_ratio = training_cfg.get('stage3_base_lr_ratio', None)
         self._optimizer_modified_for_stage3 = False  # Track if we've modified optimizer
+        # L1 regularization on cross-attention weights
+        self.l1_lambda = training_cfg.get('l1_lambda', 0.0)
 
     def _validate_inputs(self, X, y, num_task=None, num_pretask=None, return_rdkit_mol=False):
         """Compute num_atom_types from scattering dimension."""
@@ -257,7 +274,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             cross_attn_bottleneck=cross_attn_bottleneck,
         )
         self.model = ScatteringTransformerAdapter(
-            denoiser
+            denoiser,
+            l1_lambda=self.l1_lambda
         ).to(self.device)
         
         # Handle checkpoint loading based on training stage

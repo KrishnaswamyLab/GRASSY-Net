@@ -34,6 +34,7 @@ training:
   epochs: 200
   batch_size: 256
   learning_rate: 1.0e-4
+  l1_lambda: 0.0  # L1 regularization on cross-attention weights (try 1e-6 to 1e-5)
 
 # Checkpoint configuration
 checkpoint:

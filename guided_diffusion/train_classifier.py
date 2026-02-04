@@ -79,6 +79,7 @@ def train_epoch(
     num_timesteps: int,
     epoch: int,
     log_wandb: bool = True,
+    l1_lambda: float = 0.0,
 ):
     """
     Train for one epoch.
@@ -110,7 +111,14 @@ def train_epoch(
         pred_moments = model(noisy_X, noisy_E, t, node_mask)
         
         # MSE loss
-        loss = F.mse_loss(pred_moments, clean_moments)
+        mse_loss = F.mse_loss(pred_moments, clean_moments)
+        
+        # L1 regularization
+        if l1_lambda > 0:
+            l1_penalty = sum(p.abs().sum() for p in model.parameters() if p.requires_grad)
+            loss = mse_loss + l1_lambda * l1_penalty
+        else:
+            loss = mse_loss
         
         # Backward pass
         loss.backward()
@@ -139,10 +147,14 @@ def train_epoch(
         # Log to wandb
         if log_wandb and batch_idx % 100 == 0:
             step = epoch * len(dataloader) + batch_idx
-            wandb.log({
+            log_dict = {
                 'train/batch_loss': loss.item(),
+                'train/batch_mse_loss': mse_loss.item(),
                 'train/step': step,
-            })
+            }
+            if l1_lambda > 0:
+                log_dict['train/batch_l1_penalty'] = (loss.item() - mse_loss.item()) / l1_lambda
+            wandb.log(log_dict)
     
     avg_loss = total_loss / num_batches
     
@@ -235,6 +247,7 @@ def train_classifier(
     wandb_project: str = 'GRASSY-Classifier',
     wandb_enabled: bool = True,
     device: str = 'auto',
+    l1_lambda: float = 0.0,
 ):
     """
     Train the moment classifier.
@@ -346,6 +359,7 @@ def train_classifier(
                 'val_split': val_split,
                 'init_from_dit': init_from_dit,
                 'freeze_encoder': freeze_encoder,
+                'l1_lambda': l1_lambda,
                 'max_node': dataset.max_node,
                 'Xdim': dataset.Xdim,
                 'Edim': dataset.Edim,
@@ -364,7 +378,7 @@ def train_classifier(
     for epoch in range(1, epochs + 1):
         # Train
         train_stats = train_epoch(
-            model, train_loader, optimizer, device, num_timesteps, epoch, wandb_enabled
+            model, train_loader, optimizer, device, num_timesteps, epoch, wandb_enabled, l1_lambda
         )
         
         # Validate
@@ -520,6 +534,10 @@ def main():
     parser.add_argument('--no_wandb', action='store_true',
                         help='Disable wandb logging')
     
+    # Regularization
+    parser.add_argument('--l1_lambda', type=float, default=0.0,
+                        help='L1 regularization weight (0.0 = disabled, try 1e-5 to 1e-4)')
+    
     # Device
     parser.add_argument('--device', type=str, default='auto',
                         help="Device to use ('auto', 'cuda', 'cpu')")
@@ -544,6 +562,7 @@ def main():
         wandb_project=args.wandb_project,
         wandb_enabled=not args.no_wandb,
         device=args.device,
+        l1_lambda=args.l1_lambda,
     )
 
 
