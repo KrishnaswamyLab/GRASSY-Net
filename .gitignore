@@ -68,3 +68,26 @@ wandb/
 
 #Ignore .npy
 *.npygenerated_*.txt
+
+# Agent infrastructure (local only)
+.agents/
+
+# Data files
+datasets/
+*.npy
+*.npy.gz
+*.smi.gz
+
+# Generated outputs
+generated_*.txt
+
+# Processed data
+grassy_dit/data_*/
+grassy_dit/data/__MACOSX/
+grassy_dit/data/data_*/
+
+# Agent-created dirs
+cluster/
+experiments/
+configs/
+results/
