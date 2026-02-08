@@ -280,23 +280,22 @@ class SELayerWithCrossAttention(nn.Module):
             nn.SiLU(), nn.Linear(hidden_size, 9 * hidden_size)
         )
 
-    def forward(self, x, c, node_mask, scatter_tokens, skip_cross_attn=False):
+    def forward(self, x, c, node_mask, scatter_tokens):
         # c: [B, D] timestep embedding
         shift1, scale1, gate1, shift2, scale2, gate2, shift3, scale3, gate3 = self.adaLN(c).chunk(9, dim=1)
-        
+
         # Self-attention (modulated)
         h = modulate(self.norm1(x), shift1, scale1)
         x = x + gate1.unsqueeze(1) * self.attn(h, node_mask=node_mask)
-        
-        # Cross-attention to scattering (modulated) - skip in stage 1
-        if not skip_cross_attn:
-            h = modulate(self.norm_cross(x), shift2, scale2)
-            x = x + gate2.unsqueeze(1) * self.cross_attn(h, scatter_tokens)
-        
+
+        # Cross-attention to scattering (modulated)
+        h = modulate(self.norm_cross(x), shift2, scale2)
+        x = x + gate2.unsqueeze(1) * self.cross_attn(h, scatter_tokens)
+
         # MLP (modulated)
         h = modulate(self.norm2(x), shift3, scale3)
         x = x + gate3.unsqueeze(1) * self.mlp(h)
-        
+
         return x
 
 
@@ -317,15 +316,15 @@ class ScatteringDenoiser(nn.Module):
     """
     
     def __init__(self, max_n_nodes, hidden_size=384, depth=12, num_heads=16,
-                 mlp_ratio=4.0, Xdim=10, Edim=5, 
+                 mlp_ratio=4.0, Xdim=10, Edim=5,
                  num_atom_types=16, num_levels=11, num_moments=4, device=None,
                  moment_noise_cfg=None, use_moment_tokens=False, use_level_tokens=True,
-                 use_fixed_projections=False, training_stage=1,
+                 use_fixed_projections=False,
                  cross_attn_drop=0.0, cross_attn_bottleneck=None):
         super().__init__()
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
+
         print(f"Using device: {device}")
         self.device = device
         self.max_n_nodes = max_n_nodes
@@ -333,7 +332,6 @@ class ScatteringDenoiser(nn.Module):
         self.use_moment_tokens = use_moment_tokens
         self.use_level_tokens = use_level_tokens
         self.use_fixed_projections = use_fixed_projections
-        self.training_stage = training_stage  # 1 = unconditional, 2 = cross-attention only
         self.cross_attn_drop = cross_attn_drop
         self.cross_attn_bottleneck = cross_attn_bottleneck
         
@@ -374,69 +372,7 @@ class ScatteringDenoiser(nn.Module):
         for block in self.blocks:
             nn.init.zeros_(block.adaLN[-1].weight)
 
-    def freeze_for_stage2(self):
-        """
-        Freeze all parameters except cross-attention and scattering tokenizer.
-        Call this after loading a Stage 1 checkpoint to train Stage 2.
-        """
-        # Freeze input embeddings
-        for param in self.x_embedder.parameters():
-            param.requires_grad = False
-        for param in self.t_embedder.parameters():
-            param.requires_grad = False
-        
-        # Freeze transformer blocks (except cross-attention parts)
-        for block in self.blocks:
-            # Freeze self-attention
-            for param in block.attn.parameters():
-                param.requires_grad = False
-            for param in block.norm1.parameters():
-                param.requires_grad = False
-            # Freeze MLP
-            for param in block.mlp.parameters():
-                param.requires_grad = False
-            for param in block.norm2.parameters():
-                param.requires_grad = False
-            # Freeze adaLN modulation
-            for param in block.adaLN.parameters():
-                param.requires_grad = False
-            
-            # KEEP TRAINABLE: cross_attn, norm_cross
-        
-        # Freeze output layer
-        for param in self.out_layer.parameters():
-            param.requires_grad = False
-        
-        # KEEP TRAINABLE: scatter_tokenizer (all of it)
-        
-        # Update training stage
-        self.training_stage = 2
-        
-        # Log trainable vs total parameters
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        total = sum(p.numel() for p in self.parameters())
-        print(f"Stage 2 freezing complete:")
-        print(f"  Trainable: {trainable:,} / {total:,} params ({100*trainable/total:.1f}%)")
-        print(f"  Trainable components: scatter_tokenizer, cross_attn, norm_cross")
-
-    def unfreeze_all(self):
-        """
-        Unfreeze all parameters for Stage 3 fine-tuning.
-        Call this after Stage 2 to train all parameters together.
-        """
-        for param in self.parameters():
-            param.requires_grad = True
-        
-        # Update training stage - use cross-attention now
-        self.training_stage = 3
-        
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        total = sum(p.numel() for p in self.parameters())
-        print(f"Stage 3 unfreezing complete:")
-        print(f"  Trainable: {trainable:,} / {total:,} params ({100*trainable/total:.1f}%)")
-        print(f"  All parameters trainable")
-
-    def forward(self, x, e, node_mask, t, scattering, uncond=False, skip_cross_attn=None):
+    def forward(self, x, e, node_mask, t, scattering, uncond=False):
         """
         Args:
             x: [B, N, Xdim] atom types (one-hot or noised)
@@ -445,29 +381,22 @@ class ScatteringDenoiser(nn.Module):
             t: [B] diffusion timestep
             scattering: [B, 440] GRASSY scattering moments
             uncond: if True, use null tokens (for CFG)
-            skip_cross_attn: if True, skip cross-attention (Stage 1 training)
-                           if None, determined by self.training_stage
         Returns:
             x_pred: [B, N, Xdim] predicted atom logits
             e_pred: [B, N, N, Edim] predicted bond logits
         """
         B, N = x.shape[:2]
         x_in, e_in = x, e
-        
-        # Determine whether to skip cross-attention
-        # Stage 1: skip (unconditional), Stage 2 & 3: use cross-attention
-        if skip_cross_attn is None:
-            skip_cross_attn = (self.training_stage == 1)
-        
+
         # Embed inputs
         x = self.x_embedder(torch.cat([x, e.reshape(B, N, -1)], dim=-1))
         c = self.t_embedder(t)
         scatter_tokens = self.scatter_tokenizer(scattering, self.training, uncond)
-        
+
         # Transformer blocks
         for block in self.blocks:
-            x = block(x, c, node_mask, scatter_tokens, skip_cross_attn=skip_cross_attn)
-        
+            x = block(x, c, node_mask, scatter_tokens)
+
         # Output projection
-        X_pred, E_pred, _ = self.out_layer(x, x_in, e_in, c, t, node_mask) 
+        X_pred, E_pred, _ = self.out_layer(x, x_in, e_in, c, t, node_mask)
         return X_pred, E_pred       

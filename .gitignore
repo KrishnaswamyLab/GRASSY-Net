@@ -91,3 +91,5 @@ cluster/
 experiments/
 configs/
 results/
+.claude/
+!configs/QM9/

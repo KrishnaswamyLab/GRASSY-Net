@@ -1,0 +1,48 @@
+# QM9 Ablation: STRONG L1 REGULARIZATION (l1_lambda=1e-4)
+# python -m grassy_dit.train --config configs/QM9/qm9_l1.yaml
+
+dataset:
+  name: "qm9"
+  data_dir: "grassy_dit/data/qm9"  # Adjust path for cluster
+  csv_file: "molecules.csv"
+  smiles_col: "smiles"
+  scatter_file: "scattering_moments.npy"
+  seed: 42
+  val_data_dir: "grassy_dit/data/qm9/val"
+  val_csv_file: null
+  val_scatter_file: null
+  val_every_n_epochs: 5
+
+scattering:
+  J: 4
+  num_moments: 4
+
+model:
+  max_node: 29
+  hidden_size: 256
+  num_layer: 12
+  num_head: 16
+  mlp_ratio: 4.0
+  # No architectural regularization
+  cross_attn_drop: 0.0
+  cross_attn_bottleneck: null
+
+training:
+  epochs: 2000
+  batch_size: 64
+  learning_rate: 1.0e-4
+  # ABLATION: Strong L1 on cross-attention weights
+  l1_lambda: 1.0e-4
+
+checkpoint:
+  save_dir: "./checkpoints/qm9/l1_reg"
+  save_best: true
+  save_every_n_epochs: 50
+  resume_from: null
+
+logging:
+  wandb:
+    enabled: true
+    project: "GRASSY-DiT-QM9-Ablation"
+    entity: "grassy"
+    name: "qm9_l1_1e-4"
