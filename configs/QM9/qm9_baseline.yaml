@@ -19,7 +19,7 @@ scattering:
 
 model:
   max_node: 29  # QM9 max atoms
-  hidden_size: 256
+  hidden_size: 1024
   num_layer: 12
   num_head: 16
   mlp_ratio: 4.0
