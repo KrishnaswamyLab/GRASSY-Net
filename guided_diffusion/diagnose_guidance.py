@@ -46,6 +46,9 @@ def run_diagnostic(
     num_nodes: int = 10,
     device: str = "cuda",
     guidance_start_step: int = 0,
+    target_edge_count: float = None,
+    edge_tau: float = 1.0,
+    edge_gamma: float = 1.0,
 ):
     """
     Run diagnostic generation with detailed logging.
@@ -65,6 +68,8 @@ def run_diagnostic(
     print(f"  - Num nodes: {num_nodes}")
     print(f"  - Device: {device}")
     print(f"  - Guidance start step: {guidance_start_step}")
+    if target_edge_count is not None:
+        print(f"  - Edge guidance: tau={edge_tau}, gamma={edge_gamma}, target_bonds={target_edge_count}")
 
     # Load model
     print(f"\nLoading model...")
@@ -114,6 +119,9 @@ def run_diagnostic(
         num_atom_types=num_atom_types,
         J=4,
         num_moments=4,
+        target_edge_count=target_edge_count,
+        edge_tau=edge_tau,
+        edge_gamma=edge_gamma,
     )
 
     print("-" * 70)
@@ -184,6 +192,12 @@ def main():
                         help='Device (cuda/cpu)')
     parser.add_argument('--guidance_start_step', type=int, default=0,
                         help='Step to start applying guidance (e.g., 250 for last 50%%)')
+    parser.add_argument('--target_edge_count', type=float, default=None,
+                        help='Target bond count (enables edge guidance). CCO=2, benzene=6')
+    parser.add_argument('--edge_tau', type=float, default=2.0,
+                        help='Edge temperature softening (>1 flattens, try 2.0-5.0)')
+    parser.add_argument('--edge_gamma', type=float, default=1.0,
+                        help='Edge count penalty weight (try 0.1-5.0)')
     parser.add_argument('--interpret', action='store_true',
                         help='Just print interpretation guide')
 
@@ -202,6 +216,9 @@ def main():
         num_nodes=args.num_nodes,
         device=args.device,
         guidance_start_step=args.guidance_start_step,
+        target_edge_count=args.target_edge_count,
+        edge_tau=args.edge_tau,
+        edge_gamma=args.edge_gamma,
     )
 
     # Print interpretation guide

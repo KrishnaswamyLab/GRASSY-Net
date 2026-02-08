@@ -20,6 +20,7 @@ from torch_molecule.generator.graph_dit.diffusion import (
 from torch_molecule.generator.graph_dit.utils import PlaceHolder
 
 from .guidance import ScatteringMomentGuidance, apply_guidance_to_probs
+from .edge_guidance import guided_edge_step, compute_expected_bond_count
 
 
 def smiles_to_scaffold(
@@ -173,6 +174,11 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._total_steps: int = 500  # Will be set dynamically if possible
         self._diagnostic_logging: bool = True  # Enable diagnostic logging for debugging
 
+        # Edge guidance parameters
+        self._target_edge_count: Optional[torch.Tensor] = None
+        self._edge_tau: float = 1.0  # Temperature softening (1.0 = no softening)
+        self._edge_gamma: float = 1.0  # Edge count penalty weight
+
         # Scaffold-specific attributes (set during guided_generate_with_scaffold)
         self._scaffold_X: Optional[torch.Tensor] = None
         self._scaffold_E: Optional[torch.Tensor] = None
@@ -191,39 +197,45 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         J: int = 4,
         num_moments: int = 4,
         labels: Optional[Union[List, np.ndarray, torch.Tensor]] = None,
+        target_edge_count: Optional[Union[float, np.ndarray, torch.Tensor]] = None,
+        edge_tau: float = 1.0,
+        edge_gamma: float = 1.0,
     ) -> List[str]:
         """
         Generate molecules with scattering moment guidance.
-        
+
         Parameters
         ----------
         target_moments : array-like
-            Target scattering moments [D] or [B, D]. If 1D, will be expanded
-            to match batch_size.
+            Target scattering moments [D] or [B, D].
         num_nodes : int or array-like, optional
-            Number of nodes per molecule. If None, samples from training distribution.
+            Number of nodes per molecule.
         batch_size : int, default=32
             Number of molecules to generate.
         guidance_scale : float, default=1.0
-            Scale for guidance gradients. Higher = stronger guidance but may
-            produce invalid molecules. Start with 1.0 and tune.
+            MOOD-style base ratio for node guidance.
         guidance_start_step : int, default=0
-            Timestep index at which to start applying guidance. Can help
-            stability by letting early steps establish structure first.
+            Step to start applying guidance.
         guidance_end_step : int, optional
-            Timestep index at which to stop applying guidance. If None, guidance
-            continues until the end. Setting this allows the model to "clean up"
-            invalid chemistry in final steps without guidance interference.
+            Step to stop applying guidance.
         num_atom_types : int, optional
-            Number of atom type categories. If None, auto-detected from model's
-            dataset_info. Falls back to 10 if not available.
+            Number of atom type categories.
         J : int, default=4
-            Number of wavelet scales in scattering transform.
+            Number of wavelet scales.
         num_moments : int, default=4
-            Number of statistical moments per scattering coefficient.
+            Number of statistical moments.
         labels : array-like, optional
-            Property labels for conditional generation (passed to base model).
-        
+            Property labels for conditional generation.
+        target_edge_count : float or array-like, optional
+            Target number of bonds. If provided, enables edge guidance with
+            temperature softening and edge count penalty.
+        edge_tau : float, default=1.0
+            Temperature for edge softening (>1 flattens distributions).
+            Only used when target_edge_count is provided.
+        edge_gamma : float, default=1.0
+            Weight of edge count penalty vs scattering gradient.
+            Only used when target_edge_count is provided.
+
         Returns
         -------
         List[str]
@@ -269,11 +281,30 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         else:
             self._total_steps = 500  # default fallback
 
+        # Edge guidance parameters
+        if target_edge_count is not None:
+            if isinstance(target_edge_count, (int, float)):
+                self._target_edge_count = torch.tensor(
+                    [float(target_edge_count)] * batch_size, device=self.device
+                )
+            elif isinstance(target_edge_count, np.ndarray):
+                self._target_edge_count = torch.from_numpy(target_edge_count).float().to(self.device)
+            else:
+                self._target_edge_count = target_edge_count.float().to(self.device)
+            self._edge_tau = edge_tau
+            self._edge_gamma = edge_gamma
+        else:
+            self._target_edge_count = None
+            self._edge_tau = 1.0
+            self._edge_gamma = 1.0
+
         print(f"[GUIDANCE] Starting guided generation with:")
         print(f"  - guidance_scale: {guidance_scale}")
         print(f"  - total_steps: {self._total_steps}")
         print(f"  - guidance_window: [{guidance_start_step}, {guidance_end_step or 'end'})")
         print(f"  - target_moments shape: {target_moments.shape}")
+        if self._target_edge_count is not None:
+            print(f"  - edge guidance: tau={edge_tau}, gamma={edge_gamma}, target_bonds={target_edge_count}")
         
         # Convert num_nodes to tensor format expected by parent
         if num_nodes is not None and isinstance(num_nodes, int):
@@ -294,6 +325,9 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             self._guidance_start_step = 0
             self._guidance_end_step = None
             self._current_step = 0
+            self._target_edge_count = None
+            self._edge_tau = 1.0
+            self._edge_gamma = 1.0
     
     def guided_generate_with_scaffold(
         self,
@@ -570,9 +604,21 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
                 print(f"  guidance_scale (MOOD base_ratio): {self._guidance_scale}")
                 print(f"==========================================\n")
 
-            # Apply MOOD-normalized guidance to posterior
+            # Apply MOOD-normalized guidance to nodes
             prob_X = apply_guidance_to_probs(prob_X, grad_X, self._guidance_scale)
-            prob_E = apply_guidance_to_probs(prob_E, grad_E, self._guidance_scale)
+
+            # Apply edge guidance: temperature softening + count penalty if available
+            if self._target_edge_count is not None:
+                prob_E, edge_diag = guided_edge_step(
+                    prob_E, grad_E, self._target_edge_count, node_mask,
+                    tau=self._edge_tau,
+                    gamma=self._edge_gamma,
+                    base_ratio=self._guidance_scale,
+                    return_diagnostics=is_diagnostic_step,
+                )
+            else:
+                prob_E = apply_guidance_to_probs(prob_E, grad_E, self._guidance_scale)
+                edge_diag = None
 
             # Diagnostic: log after guidance
             if is_diagnostic_step:
@@ -587,6 +633,15 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
                 print(f"  EDGES (E) for edge (0,0):")
                 print(f"    Before guidance:  {np.array2string(prob_E_before, precision=4, suppress_small=True)}")
                 print(f"    After guidance:   {np.array2string(prob_E_after, precision=4, suppress_small=True)}")
+                print(f"    Edge delta:       {np.array2string(prob_E_after - prob_E_before, precision=4, suppress_small=True)}")
+                if edge_diag is not None:
+                    print(f"  EDGE GUIDANCE:")
+                    print(f"    Target bonds:       {edge_diag['target_edge_count']:.1f}")
+                    print(f"    Expected before:    {edge_diag['expected_bonds_before']:.1f}")
+                    print(f"    Expected after:     {edge_diag['expected_bonds_after']:.1f}")
+                    print(f"    Bond excess:        {edge_diag['bond_excess']:.2f}")
+                    print(f"    Edges changed>0.01: {edge_diag['edges_changed']}")
+                    print(f"    Max edge delta:     {edge_diag['max_edge_delta']:.4f}")
                 print(f"==============================================================\n")
 
         self._current_step += 1
