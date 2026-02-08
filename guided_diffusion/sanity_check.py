@@ -30,13 +30,14 @@ print(f"  raw_ratio_E: {raw_ratio_E:.2f}")
 print(f"  grad_X range: [{grad_X.min():.4f}, {grad_X.max():.4f}]")
 print(f"  pred_X range: [{pred_X.min():.4f}, {pred_X.max():.4f}]")
 
-# Test MOOD-normalized guidance at different scales
+# Test MOOD-normalized guidance at wide range of scales
+# (normalization might be too conservative — test bigger values too)
 print()
 print("=" * 60)
-print("MOOD-NORMALIZED GUIDANCE (Fix A)")
+print("MOOD-NORMALIZED GUIDANCE (Fix A + Fix B)")
 print("=" * 60)
 
-for scale in [0.01, 0.05, 0.1, 0.2, 0.5]:
+for scale in [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]:
     guided_X = apply_guidance_to_probs(pred_X, grad_X, scale)
     delta = (guided_X - pred_X).abs().mean().item()
 
@@ -50,23 +51,23 @@ for scale in [0.01, 0.05, 0.1, 0.2, 0.5]:
         new_loss = F.mse_loss(new_moments, target, reduction='sum').item()
     loss_reduction = loss - new_loss
 
-    print(f"  scale={scale:.2f} | delta={delta:.6f} | effective_ratio={effective_ratio:.4f} | loss_change={loss_reduction:+.2f}")
+    print(f"  scale={scale:5.1f} | delta={delta:.6f} | eff_ratio={effective_ratio:.4f} | loss_change={loss_reduction:+.2f}")
 
-# Verify the best scale actually reduces loss
+# Direction check at multiple scales
 print()
-guided_X_01 = apply_guidance_to_probs(pred_X, grad_X, 0.1)
+print("=" * 60)
+print("DIRECTION CHECK (does guidance move toward target?)")
+print("=" * 60)
+
 with torch.no_grad():
     orig_moments = guidance.compute_moments(pred_X, pred_E, node_mask)
-    new_moments = guidance.compute_moments(guided_X_01, pred_E, node_mask)
     orig_dist = (orig_moments - target).norm(dim=-1).mean().item()
-    new_dist = (new_moments - target).norm(dim=-1).mean().item()
 
-print("=" * 60)
-print("DIRECTION CHECK (scale=0.1)")
-print("=" * 60)
-print(f"  L2 dist before guidance: {orig_dist:.4f}")
-print(f"  L2 dist after guidance:  {new_dist:.4f}")
-if new_dist < orig_dist:
-    print("  OK: Guidance moves predictions toward target")
-else:
-    print("  WARNING: Guidance moves AWAY from target — sign issue?")
+for scale in [0.1, 1.0, 5.0, 10.0]:
+    guided_X = apply_guidance_to_probs(pred_X, grad_X, scale)
+    guided_E = apply_guidance_to_probs(pred_E, grad_E, scale)
+    with torch.no_grad():
+        new_moments = guidance.compute_moments(guided_X, guided_E, node_mask)
+        new_dist = (new_moments - target).norm(dim=-1).mean().item()
+    status = "OK" if new_dist < orig_dist else "AWAY"
+    print(f"  scale={scale:5.1f} | L2 dist: {orig_dist:.4f} -> {new_dist:.4f} | {status}")
