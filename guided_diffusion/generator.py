@@ -132,25 +132,25 @@ def smiles_to_scaffold(
 class GuidedGraphDIT(GraphDITMolecularGenerator):
     """
     GraphDIT with scattering moment guidance during generation.
-    
+
     This class extends torch-molecule's GraphDITMolecularGenerator to support
     gradient-based guidance that steers molecule generation toward target
     scattering moments, without requiring any retraining.
-    
+
     The guidance is applied at each reverse diffusion step by:
     1. Computing scattering moments from the predicted clean graph
     2. Computing MSE loss to target moments
     3. Backpropagating to get gradients w.r.t. predictions
     4. Shifting predictions in the direction that reduces moment distance
-    
+
     Example
     -------
     >>> model = GuidedGraphDIT()
     >>> model.load_from_local("checkpoint.pt")
-    >>> 
+    >>>
     >>> # Compute target moments from reference molecule
     >>> target_moments = compute_scattering_from_smiles(["CCO"], scattering_model)
-    >>> 
+    >>>
     >>> # Generate with guidance
     >>> smiles = model.guided_generate(
     ...     target_moments=target_moments,
@@ -159,10 +159,10 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
     ...     batch_size=32
     ... )
     """
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
+
         # Guidance-specific attributes (set during guided_generate)
         self._guidance: Optional[ScatteringMomentGuidance] = None
         self._target_moments: Optional[torch.Tensor] = None
@@ -170,7 +170,9 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._guidance_start_step: int = 0  # Step to start applying guidance
         self._guidance_end_step: Optional[int] = None  # Step to stop guidance (None = guide until end)
         self._current_step: int = 0
-        
+        self._total_steps: int = 500  # Will be set dynamically if possible
+        self._diagnostic_logging: bool = True  # Enable diagnostic logging for debugging
+
         # Scaffold-specific attributes (set during guided_generate_with_scaffold)
         self._scaffold_X: Optional[torch.Tensor] = None
         self._scaffold_E: Optional[torch.Tensor] = None
@@ -258,6 +260,20 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
         self._guidance_start_step = guidance_start_step
         self._guidance_end_step = guidance_end_step  # None means guide until end
         self._current_step = 0
+
+        # Try to get total steps from the model's diffusion config
+        if hasattr(self, 'diffusion_steps'):
+            self._total_steps = self.diffusion_steps
+        elif hasattr(self, 'noise_schedule') and hasattr(self.noise_schedule, 'timesteps'):
+            self._total_steps = self.noise_schedule.timesteps
+        else:
+            self._total_steps = 500  # default fallback
+
+        print(f"[GUIDANCE] Starting guided generation with:")
+        print(f"  - guidance_scale: {guidance_scale}")
+        print(f"  - total_steps: {self._total_steps}")
+        print(f"  - guidance_window: [{guidance_start_step}, {guidance_end_step or 'end'})")
+        print(f"  - target_moments shape: {target_moments.shape}")
         
         # Convert num_nodes to tensor format expected by parent
         if num_nodes is not None and isinstance(num_nodes, int):
@@ -437,21 +453,88 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             self._current_step >= self._guidance_start_step and
             (self._guidance_end_step is None or self._current_step < self._guidance_end_step)
         )
-        
-        if (self._guidance is not None and 
+
+        # Determine if this is a diagnostic step (early, middle, late)
+        T = self._total_steps
+        diagnostic_steps = [T - 1, T // 2, 1, 0]  # early (high noise), middle, late (low noise)
+        is_diagnostic_step = (
+            self._diagnostic_logging and
+            self._current_step in diagnostic_steps and
+            self._guidance is not None
+        )
+
+        # Initialize diagnostic variables
+        pred_X_before = None
+        pred_E_before = None
+        pred_X_after_guidance = None
+        pred_E_after_guidance = None
+        applied_guidance = False
+
+        if (self._guidance is not None and
             self._target_moments is not None and
             in_guidance_window):
-            
+
+            # Save predictions BEFORE guidance for diagnostic comparison
+            if is_diagnostic_step:
+                pred_X_before = pred_X[0, 0, :].detach().cpu().numpy()
+                pred_E_before = pred_E[0, 0, 0, :].detach().cpu().numpy()
+
             # Compute guidance gradients from predictions
             with torch.enable_grad():
-                grad_X, grad_E = self._guidance.compute_guidance(
-                    pred_X, pred_E, node_mask, self._target_moments
+                grad_X, grad_E, loss_val = self._guidance.compute_guidance(
+                    pred_X, pred_E, node_mask, self._target_moments, return_loss=True
                 )
-            
+
+            # ========== STEP 1A: DIAGNOSTIC LOGGING BEFORE GUIDANCE ==========
+            if is_diagnostic_step:
+                step = self._current_step
+
+                # --- Prediction magnitudes ---
+                pred_X_mean = pred_X.abs().mean().item()
+                pred_X_max = pred_X.abs().max().item()
+                pred_E_mean = pred_E.abs().mean().item()
+                pred_E_max = pred_E.abs().max().item()
+
+                # --- Gradient magnitudes ---
+                grad_X_mean = grad_X.abs().mean().item()
+                grad_X_max = grad_X.abs().max().item()
+                grad_E_mean = grad_E.abs().mean().item()
+                grad_E_max = grad_E.abs().max().item()
+
+                # --- The critical ratio: how big is guidance relative to predictions ---
+                scale = self._guidance_scale
+                ratio_X = (scale * grad_X_mean) / (pred_X_mean + 1e-10)
+                ratio_E = (scale * grad_E_mean) / (pred_E_mean + 1e-10)
+
+                # --- Scattering moment distance before guidance ---
+                with torch.no_grad():
+                    current_moments = self._guidance.compute_moments(pred_X, pred_E, node_mask)
+                    moment_dist = (current_moments - self._target_moments).norm(dim=-1).mean().item()
+
+                print(f"\n=== GUIDANCE DIAGNOSTIC at step {step}/{T} ===")
+                print(f"  MSE loss to target: {loss_val:.6f}")
+                print(f"  pred_X  | mean: {pred_X_mean:.6f} | max: {pred_X_max:.6f}")
+                print(f"  grad_X  | mean: {grad_X_mean:.6f} | max: {grad_X_max:.6f}")
+                print(f"  ratio_X (scale*grad/pred): {ratio_X:.6f}")
+                print(f"  pred_E  | mean: {pred_E_mean:.6f} | max: {pred_E_max:.6f}")
+                print(f"  grad_E  | mean: {grad_E_mean:.6f} | max: {grad_E_max:.6f}")
+                print(f"  ratio_E (scale*grad/pred): {ratio_E:.6f}")
+                print(f"  scattering moment L2 dist to target: {moment_dist:.6f}")
+                print(f"==========================================\n")
+            # =====================================================================
+
             # Apply guidance to predictions (then posterior computed from guided pred)
             pred_X = apply_guidance_to_probs(pred_X, grad_X, self._guidance_scale)
             pred_E = apply_guidance_to_probs(pred_E, grad_E, self._guidance_scale)
-        
+
+            # ========== STEP 1B: LOG AFTER GUIDANCE ==========
+            if is_diagnostic_step:
+                pred_X_after_guidance = pred_X[0, 0, :].detach().cpu().numpy()
+                pred_E_after_guidance = pred_E[0, 0, 0, :].detach().cpu().numpy()
+            # =================================================
+
+            applied_guidance = True
+
         self._current_step += 1
         # ==============================================================
         
@@ -484,7 +567,27 @@ class GuidedGraphDIT(GraphDITMolecularGenerator):
             unnormalized_prob_E, dim=-1, keepdim=True
         )
         prob_E = prob_E.reshape(bs, n, n, pred_E.shape[-1])
-        
+
+        # ========== STEP 1B (continued): LOG AFTER POSTERIOR ==========
+        if applied_guidance and is_diagnostic_step and pred_X_before is not None:
+
+            pred_X_after_posterior = prob_X[0, 0, :].detach().cpu().numpy()
+            pred_E_after_posterior = prob_E[0, 0, 0, :].detach().cpu().numpy()
+
+            print(f"\n=== PROBABILITY TRACKING at step {self._current_step - 1}, node 0 ===")
+            print(f"  NODES (X):")
+            print(f"    Before guidance:  {np.array2string(pred_X_before, precision=4, suppress_small=True)}")
+            print(f"    After guidance:   {np.array2string(pred_X_after_guidance, precision=4, suppress_small=True)}")
+            print(f"    After posterior:  {np.array2string(pred_X_after_posterior, precision=4, suppress_small=True)}")
+            print(f"    Guidance delta:   {np.array2string(pred_X_after_guidance - pred_X_before, precision=4, suppress_small=True)}")
+            print(f"    Posterior delta:  {np.array2string(pred_X_after_posterior - pred_X_after_guidance, precision=4, suppress_small=True)}")
+            print(f"  EDGES (E) for edge (0,0):")
+            print(f"    Before guidance:  {np.array2string(pred_E_before, precision=4, suppress_small=True)}")
+            print(f"    After guidance:   {np.array2string(pred_E_after_guidance, precision=4, suppress_small=True)}")
+            print(f"    After posterior:  {np.array2string(pred_E_after_posterior, precision=4, suppress_small=True)}")
+            print(f"==============================================================\n")
+        # ===============================================================
+
         # Apply classifier-free guidance if configured (from parent)
         if self.guide_scale is not None and self.guide_scale != 1:
             # Get unconditional predictions

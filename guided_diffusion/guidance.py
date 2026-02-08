@@ -124,26 +124,36 @@ def apply_guidance_to_probs(
     eps: float = 1e-8
 ) -> torch.Tensor:
     """
-    Apply guidance gradient to probability distribution.
-    
-    Works directly in probability space for correct gradient descent.
-    
+    Apply guidance with MOOD-style normalization in logit space.
+
+    Instead of adding raw gradients to probabilities (which overpowers the model),
+    this normalizes the gradient so its magnitude is a controlled fraction of the
+    prediction magnitude, then applies in logit space via log -> add -> softmax.
+
+    The `scale` parameter now means "what fraction of the prediction magnitude
+    should the guidance adjustment be". E.g., scale=0.1 means the guidance
+    adjustment is 10% the magnitude of the predictions.
+
+    Recommended sweep: [0.01, 0.05, 0.1, 0.2, 0.5]
+
     Args:
         prob: [..., K] probability distribution (sums to 1 over last dim)
-        grad: [..., K] gradient to apply (should be -∂loss/∂prob for minimization)
-        scale: Guidance scale (higher = stronger guidance)
+        grad: [..., K] gradient to apply (should be -dloss/dprob for minimization)
+        scale: Base ratio — guidance magnitude as fraction of prediction magnitude
         eps: Small value for numerical stability
-    
+
     Returns:
         guided_prob: [..., K] guided probability distribution
     """
-    # Apply gradient directly in probability space
-    guided_prob = prob + scale * grad
-    
-    # Ensure non-negative
-    guided_prob = guided_prob.clamp(min=eps)
-    
-    # Re-normalize to sum to 1
-    guided_prob = guided_prob / guided_prob.sum(dim=-1, keepdim=True)
-    
+    pred_norm = prob.abs().mean()
+    grad_norm = grad.abs().mean() + eps
+
+    # Scale gradient so its magnitude is `scale * prediction magnitude`
+    normalized_scale = scale * pred_norm / grad_norm
+
+    # Apply in logit space: log-probs -> shift -> softmax
+    logits = torch.log(prob + eps)
+    guided_logits = logits + normalized_scale * grad  # grad already negated in compute_guidance
+    guided_prob = F.softmax(guided_logits, dim=-1)
+
     return guided_prob
