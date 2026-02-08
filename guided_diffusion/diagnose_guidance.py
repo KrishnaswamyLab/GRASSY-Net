@@ -45,6 +45,7 @@ def run_diagnostic(
     num_samples: int = 4,
     num_nodes: int = 10,
     device: str = "cuda",
+    guidance_start_step: int = 0,
 ):
     """
     Run diagnostic generation with detailed logging.
@@ -63,6 +64,7 @@ def run_diagnostic(
     print(f"  - Num samples: {num_samples}")
     print(f"  - Num nodes: {num_nodes}")
     print(f"  - Device: {device}")
+    print(f"  - Guidance start step: {guidance_start_step}")
 
     # Load model
     print(f"\nLoading model...")
@@ -108,6 +110,7 @@ def run_diagnostic(
         num_nodes=num_nodes,
         batch_size=num_samples,
         guidance_scale=guidance_scale,
+        guidance_start_step=guidance_start_step,
         num_atom_types=num_atom_types,
         J=4,
         num_moments=4,
@@ -179,6 +182,8 @@ def main():
                         help='Number of atoms per molecule')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='Device (cuda/cpu)')
+    parser.add_argument('--guidance_start_step', type=int, default=0,
+                        help='Step to start applying guidance (e.g., 250 for last 50%%)')
     parser.add_argument('--interpret', action='store_true',
                         help='Just print interpretation guide')
 
@@ -196,6 +201,7 @@ def main():
         num_samples=args.num_samples,
         num_nodes=args.num_nodes,
         device=args.device,
+        guidance_start_step=args.guidance_start_step,
     )
 
     # Print interpretation guide
