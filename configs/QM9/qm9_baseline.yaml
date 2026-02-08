@@ -3,12 +3,12 @@
 
 dataset:
   name: "qm9"
-  data_dir: "grassy_dit/data/qm9"  # Adjust path for cluster
+  data_dir: "runs/qm9_h512_l1/stage_3_splitting/train"
   csv_file: "molecules.csv"
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
   seed: 42
-  val_data_dir: "grassy_dit/data/qm9/val"
+  val_data_dir: "runs/qm9_h512_l1/stage_3_splitting/val"
   val_csv_file: null
   val_scatter_file: null
   val_every_n_epochs: 5
