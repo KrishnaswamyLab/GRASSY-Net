@@ -137,7 +137,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self.config = config
         self.checkpoint_dir = checkpoint_cfg.get('save_dir', './checkpoints')
         self.save_every_n_epochs = checkpoint_cfg.get('save_every_n_epochs', 10)
-        self._best_loss = float('inf')
+        self._best_val_loss = float('inf')
 
         # L1 regularization on cross-attention weights
         self.l1_lambda = training_cfg.get('l1_lambda', 0.0)
@@ -225,18 +225,13 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         avg_train_loss = sum(losses) / len(losses)
         current_epoch = epoch + 1
 
-        # Save checkpoint if train loss improved
-        if self.checkpoint_dir and avg_train_loss < self._best_loss:
-            self._best_loss = avg_train_loss
-            self._save_best_checkpoint(current_epoch, avg_train_loss)
-
         # Run validation every N epochs (if val data exists)
         val_loss = None
         val_every = getattr(self, '_val_every_n_epochs', 1)
         if getattr(self, '_val_smiles', None) is not None and current_epoch % val_every == 0:
             val_loss = self._compute_val_loss()
-            if val_loss is not None and self.checkpoint_dir and val_loss < self._best_loss:
-                self._best_loss = val_loss
+            if val_loss is not None and self.checkpoint_dir and val_loss < self._best_val_loss:
+                self._best_val_loss = val_loss
                 self._save_best_checkpoint(current_epoch, val_loss)
 
         # Periodic generation evaluation
@@ -250,11 +245,11 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             loss_str += f" - Val: {val_loss:.6f}"
         if validity is not None:
             loss_str += f" - V:{validity:.1f}% U:{uniqueness:.1f}%"
-        loss_str += f" - Best: {self._best_loss:.6f}"
+        loss_str += f" - BestVal: {self._best_val_loss:.6f}"
         print(loss_str)
 
         if wandb.run is not None:
-            log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_loss": self._best_loss}
+            log_dict = {"epoch": current_epoch, "train_loss_epoch": avg_train_loss, "best_val_loss": self._best_val_loss}
             if val_loss is not None:
                 log_dict["val_loss"] = val_loss
             if validity is not None:
