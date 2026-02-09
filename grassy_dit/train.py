@@ -131,6 +131,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             epochs=training_cfg.get('epochs', 100),
             batch_size=training_cfg.get('batch_size', 32),
             learning_rate=training_cfg.get('learning_rate', 1e-4),
+            weight_decay=training_cfg.get('weight_decay', 0.0),
             **kwargs
         )
 
@@ -141,6 +142,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
         # L1 regularization on cross-attention weights
         self.l1_lambda = training_cfg.get('l1_lambda', 0.0)
+
+        # Targeted weight decay on conditioning pathway only
+        self.conditioning_weight_decay = training_cfg.get('conditioning_weight_decay', 0.0)
 
         # Periodic generation evaluation (validity/uniqueness)
         self._gen_eval_every = training_cfg.get('gen_eval_every', 50)
@@ -216,6 +220,42 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             self.model.load_state_dict(checkpoint["model_state_dict"])
 
         return self.model
+
+    # Conditioning pathway module name patterns (for targeted weight decay)
+    CONDITIONING_PATTERNS = ('scatter_tokenizer', 'cross_attn', 'norm_cross')
+
+    def _setup_optimizers(self):
+        """Override to support targeted weight decay on conditioning pathway only."""
+        cwd = self.conditioning_weight_decay
+        gwd = self.weight_decay
+
+        # If no targeted decay, fall back to base class (single group)
+        if cwd == 0.0:
+            return super()._setup_optimizers()
+
+        # Split parameters into conditioning vs core denoiser
+        conditioning_params = []
+        core_params = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if any(pat in name for pat in self.CONDITIONING_PATTERNS):
+                conditioning_params.append(param)
+            else:
+                core_params.append(param)
+
+        optimizer = torch.optim.Adam([
+            {'params': core_params, 'weight_decay': gwd},
+            {'params': conditioning_params, 'weight_decay': cwd},
+        ], lr=self.learning_rate)
+
+        scheduler = None
+        if self.use_lr_scheduler:
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode="min", factor=self.scheduler_factor,
+                patience=self.scheduler_patience, min_lr=1e-6,
+            )
+        return optimizer, scheduler
 
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
         """Override to add validation and save best checkpoint."""
