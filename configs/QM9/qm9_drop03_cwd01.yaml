@@ -1,0 +1,47 @@
+# QM9 Ablation: dropout=0.3 + cwd=0.1
+# python -m grassy_dit.train --config configs/QM9/qm9_drop03_cwd01.yaml
+
+dataset:
+  name: "qm9"
+  data_dir: "runs/qm9_h512_l1/stage_3_splitting/train"
+  csv_file: "molecules.csv"
+  smiles_col: "smiles"
+  scatter_file: "scattering_moments.npy"
+  seed: 42
+  val_data_dir: "runs/qm9_h512_l1/stage_3_splitting/val"
+  val_csv_file: null
+  val_scatter_file: null
+  val_every_n_epochs: 5
+
+scattering:
+  J: 4
+  num_moments: 4
+
+model:
+  max_node: 29
+  hidden_size: 1024
+  num_layer: 6
+  num_head: 16
+  mlp_ratio: 4.0
+  cross_attn_drop: 0.3
+  cross_attn_bottleneck: null
+
+training:
+  epochs: 1000
+  batch_size: 128
+  learning_rate: 1.0e-4
+  l1_lambda: 0.0
+  conditioning_weight_decay: 0.1
+
+checkpoint:
+  save_dir: "./checkpoints/qm9/drop03_cwd01"
+  save_best: true
+  save_every_n_epochs: 50
+  resume_from: null
+
+logging:
+  wandb:
+    enabled: true
+    project: "GRASSY-DiT-QM9-Ablation"
+    entity: "grassy"
+    name: "qm9_drop03_cwd01"
