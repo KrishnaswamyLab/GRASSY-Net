@@ -1,5 +1,5 @@
-# QM9 Ablation: Conditioning Weight Decay 1e-2
-# python -m grassy_dit.train --config configs/QM9/qm9_cwd_1e2.yaml
+# QM9 Ablation: Conditioning Weight Decay 0.5
+# python -m grassy_dit.train --config configs/QM9/qm9_cwd_05.yaml
 
 dataset:
   name: "qm9"
@@ -31,10 +31,10 @@ training:
   batch_size: 64
   learning_rate: 1.0e-4
   l1_lambda: 0.0
-  conditioning_weight_decay: 1.0e-2
+  conditioning_weight_decay: 0.5
 
 checkpoint:
-  save_dir: "./checkpoints/qm9/cwd_1e2"
+  save_dir: "./checkpoints/qm9/cwd_05"
   save_best: true
   save_every_n_epochs: 50
   resume_from: null
@@ -44,4 +44,4 @@ logging:
     enabled: true
     project: "GRASSY-DiT-QM9-Ablation"
     entity: "grassy"
-    name: "qm9_cwd_1e2"
+    name: "qm9_cwd_05"
