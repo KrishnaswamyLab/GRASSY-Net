@@ -20,15 +20,15 @@ scattering:
 model:
   max_node: 29
   hidden_size: 1024
-  num_layer: 12
+  num_layer: 6
   num_head: 16
   mlp_ratio: 4.0
   cross_attn_drop: 0.0
   cross_attn_bottleneck: null
 
 training:
-  epochs: 2000
-  batch_size: 64
+  epochs: 1000
+  batch_size: 128
   learning_rate: 1.0e-4
   l1_lambda: 0.0
   conditioning_weight_decay: 1.0e-2
