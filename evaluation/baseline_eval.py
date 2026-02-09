@@ -299,10 +299,8 @@ def main():
 
     # Load baseline model
     print(f"\nLoading baseline GraphDiT model from {args.checkpoint}...")
-    model = GraphDITMolecularGenerator()
+    model = GraphDITMolecularGenerator(device=args.device)
     model.load_from_local(args.checkpoint)
-    model.device = torch.device(args.device)
-    model.to(model.device)
 
     # Generate molecules
     generated_smiles, gen_stats = generate_unconditional(
