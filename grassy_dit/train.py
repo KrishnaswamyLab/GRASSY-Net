@@ -180,6 +180,11 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
     def _initialize_model(self, model_class, checkpoint=None):
         """Override to use ScatteringDenoiser instead of Transformer."""
+        # Pick up stashed checkpoint from resume_from (set in main before fit())
+        if checkpoint is None and hasattr(self, '_resume_checkpoint'):
+            checkpoint = self._resume_checkpoint
+            del self._resume_checkpoint
+
         if checkpoint is not None:
             self._setup_diffusion_params(checkpoint)
 
@@ -638,9 +643,9 @@ if __name__ == "__main__":
     model.num_levels = num_levels
     model.num_moments = num_moments
 
-   # Load checkpoint into model if resuming
+   # Stash checkpoint so _initialize_model can use it when called from fit()
     if checkpoint is not None:
-        model._initialize_model(None, checkpoint=checkpoint)
+        model._resume_checkpoint = checkpoint
 
     # =========================================================================
     # Train
