@@ -146,6 +146,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         # Targeted weight decay on conditioning pathway only
         self.conditioning_weight_decay = training_cfg.get('conditioning_weight_decay', 0.0)
 
+        # Resume support: start_epoch offsets epoch counter for logging/checkpointing
+        self._start_epoch = training_cfg.get('start_epoch', 0)
+
         # Periodic generation evaluation (validity/uniqueness)
         self._gen_eval_every = training_cfg.get('gen_eval_every', 50)
 
@@ -263,7 +266,7 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
         losses = super()._train_epoch(train_loader, optimizer, epoch, global_pbar)
         avg_train_loss = sum(losses) / len(losses)
-        current_epoch = epoch + 1
+        current_epoch = epoch + 1 + self._start_epoch
 
         # Run validation every N epochs (if val data exists)
         val_loss = None
@@ -280,7 +283,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             validity, uniqueness = self._compute_generation_metrics(n_samples=100)
 
         # Logging
-        loss_str = f"Epoch {current_epoch}/{self.epochs} - Train: {avg_train_loss:.6f}"
+        total_epochs = self.epochs + self._start_epoch
+        loss_str = f"Epoch {current_epoch}/{total_epochs} - Train: {avg_train_loss:.6f}"
         if val_loss is not None:
             loss_str += f" - Val: {val_loss:.6f}"
         if validity is not None:
@@ -416,6 +420,10 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         self._val_smiles = X_val
         self._val_scattering = y_val
         self._val_every_n_epochs = val_every_n_epochs
+
+        # Adjust epochs for resume: base class runs (epochs - start_epoch) iterations
+        if self._start_epoch > 0:
+            self.epochs = max(1, self.epochs - self._start_epoch)
 
         # Call parent fit which will trigger _validate_inputs and _initialize_model
         result = super().fit(X_train=X_train, y_train=y_train, **kwargs)
