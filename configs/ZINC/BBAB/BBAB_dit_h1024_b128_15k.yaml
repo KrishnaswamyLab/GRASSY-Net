@@ -1,0 +1,66 @@
+# GRASSY-DiT Training Configuration — BBAB h1024 b128 15k epochs
+# Usage:
+#   python -m grassy_dit.train --config configs/ZINC/BBAB/BBAB_dit_h1024_b128_15k.yaml
+
+# Dataset configuration
+dataset:
+  name: "bbab"
+  data_dir: "grassy_dit/data/data_bbab"
+  csv_file: "molecules.csv"
+  smiles_col: "smiles"
+  scatter_file: "scattering_moments.npy"
+  seed: 42
+
+  # Validation data (optional - leave null to use train loss for checkpointing)
+  val_data_dir: grassy_dit/data/data_bbab/val
+  val_csv_file: null
+  val_scatter_file: null
+  val_every_n_epochs: 5
+
+scattering:
+  J: 4
+  num_moments: 4
+
+# Augmentation configuration (moment noise for robustness)
+augmentation:
+  moment_noise:
+    prob: 0.2           # 20% of samples get noise
+    lower_scalar: 0.25  # corrupt at least 25% of moments
+    upper_scalar: 1.0   # corrupt up to 100% of moments
+    noise_std: 0.1      # Gaussian noise std (mean=0)
+
+# Model architecture
+model:
+  max_node: 18
+  hidden_size: 1024
+  num_layer: 12
+  num_head: 16
+  mlp_ratio: 4.0
+
+# Training configuration
+training:
+  epochs: 15000
+  batch_size: 128
+  learning_rate: 1.0e-4
+
+# Checkpoint configuration
+checkpoint:
+  save_dir: "./checkpoints/zinc/bbab_h1024_b128_15k"
+  save_best: true
+  save_every_n_epochs: 50
+  resume_from: null
+
+# Hardware configuration
+hardware:
+  device: "auto"
+  num_workers: 4
+  pin_memory: true
+
+# Logging configuration
+logging:
+  wandb:
+    enabled: true
+    project: "GRASSY-DiT"
+    entity: "grassy"
+    name: null
+  verbose: true
