@@ -43,6 +43,7 @@ training:
   batch_size: 128
   learning_rate: 1.0e-4
   conditioning_weight_decay: 0.1
+  gen_eval_every: 500
 
 # Checkpoint configuration
 checkpoint:
