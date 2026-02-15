@@ -42,6 +42,7 @@ training:
   epochs: 7200
   batch_size: 128
   learning_rate: 1.0e-4
+  conditioning_weight_decay: 0.1
 
 # Checkpoint configuration
 checkpoint:
