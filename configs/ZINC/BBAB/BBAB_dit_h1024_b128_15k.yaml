@@ -1,17 +1,17 @@
-# GRASSY-DiT Training Configuration — BBAB h1024 b128 15k epochs
+# GRASSY-DiT Training Configuration — BBAB h1024 b128 7200 epochs
 # Usage:
 #   python -m grassy_dit.train --config configs/ZINC/BBAB/BBAB_dit_h1024_b128_15k.yaml
 
 # Dataset configuration
 dataset:
   name: "bbab"
-  data_dir: "grassy_dit/data/data_bbab"
+  data_dir: "grassy_dit/data/data_bbab/train"
   csv_file: "molecules.csv"
   smiles_col: "smiles"
   scatter_file: "scattering_moments.npy"
   seed: 42
 
-  # Validation data (optional - leave null to use train loss for checkpointing)
+  # Validation data
   val_data_dir: grassy_dit/data/data_bbab/val
   val_csv_file: null
   val_scatter_file: null
@@ -39,7 +39,7 @@ model:
 
 # Training configuration
 training:
-  epochs: 15000
+  epochs: 7200
   batch_size: 128
   learning_rate: 1.0e-4
 

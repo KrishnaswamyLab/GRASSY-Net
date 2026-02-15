@@ -3,7 +3,7 @@
 #SBATCH --partition=catfish
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
-#SBATCH --time=72:00:00
+#SBATCH --time=168:00:00
 #SBATCH --output=BBAB_dit_h1024_%j.out
 #SBATCH --error=BBAB_dit_h1024_%j.err
 
