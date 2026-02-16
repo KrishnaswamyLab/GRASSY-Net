@@ -2,15 +2,16 @@
 import argparse
 import sys
 from pathlib import Path
+
+# Add external/moses to path before importing moses
+sys.path.insert(0, str(Path(__file__).parent.parent / "external" / "moses"))
+
 import numpy as np
 import moses
 from rdkit import Chem
 from tqdm import tqdm
 from datasets.property_utils import compute_props
 from datasets.property_utils import PROPERTIES_TO_COMPUTE
-
-# Add external/moses to path before importing moses
-sys.path.insert(0, str(Path(__file__).parent.parent / "external" / "moses"))
 
 ##################################### added this to download the MOSES data if it is not present #####################################
 import subprocess
