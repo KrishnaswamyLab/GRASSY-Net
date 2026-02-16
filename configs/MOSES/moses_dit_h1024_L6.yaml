@@ -1,0 +1,69 @@
+# GRASSY-DiT Training Configuration — MOSES full dataset, h1024, 6 layers
+# Big data approach: ~1.27M train molecules, moderate regularization
+# Usage:
+#   python -m grassy_dit.train --config configs/MOSES/moses_dit_h1024_L6.yaml
+
+# Dataset configuration
+dataset:
+  name: "moses"
+  data_dir: "grassy_dit/data/moses_full/train"
+  csv_file: "molecules.csv"
+  smiles_col: "smiles"
+  scatter_file: "scattering_moments.npy"
+  seed: 42
+
+  # Validation data
+  val_data_dir: grassy_dit/data/moses_full/val
+  val_csv_file: null
+  val_scatter_file: null
+  val_every_n_epochs: 5
+
+scattering:
+  J: 4
+  num_moments: 4
+
+# Augmentation configuration (moment noise for robustness)
+augmentation:
+  moment_noise:
+    prob: 0.2
+    lower_scalar: 0.25
+    upper_scalar: 1.0
+    noise_std: 0.1
+
+# Model architecture
+model:
+  max_node: 27
+  hidden_size: 1024
+  num_layer: 6
+  num_head: 16
+  mlp_ratio: 4.0
+
+# Training configuration
+training:
+  epochs: 200
+  batch_size: 128
+  learning_rate: 1.0e-4
+  conditioning_weight_decay: 0.01
+  gen_eval_every: 20
+
+# Checkpoint configuration
+checkpoint:
+  save_dir: "./checkpoints/moses/moses_h1024_L6"
+  save_best: true
+  save_every_n_epochs: 10
+  resume_from: null
+
+# Hardware configuration
+hardware:
+  device: "auto"
+  num_workers: 4
+  pin_memory: true
+
+# Logging configuration
+logging:
+  wandb:
+    enabled: true
+    project: "GRASSY-DiT"
+    entity: "grassy"
+    name: null
+  verbose: true

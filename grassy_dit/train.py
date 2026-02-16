@@ -239,30 +239,45 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
 
         # If no targeted decay, fall back to base class (single group)
         if cwd == 0.0:
-            return super()._setup_optimizers()
+            optimizer, scheduler = super()._setup_optimizers()
+        else:
+            # Split parameters into conditioning vs core denoiser
+            conditioning_params = []
+            core_params = []
+            for name, param in self.model.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if any(pat in name for pat in self.CONDITIONING_PATTERNS):
+                    conditioning_params.append(param)
+                else:
+                    core_params.append(param)
 
-        # Split parameters into conditioning vs core denoiser
-        conditioning_params = []
-        core_params = []
-        for name, param in self.model.named_parameters():
-            if not param.requires_grad:
-                continue
-            if any(pat in name for pat in self.CONDITIONING_PATTERNS):
-                conditioning_params.append(param)
-            else:
-                core_params.append(param)
+            optimizer = torch.optim.Adam([
+                {'params': core_params, 'weight_decay': gwd},
+                {'params': conditioning_params, 'weight_decay': cwd},
+            ], lr=self.learning_rate)
 
-        optimizer = torch.optim.Adam([
-            {'params': core_params, 'weight_decay': gwd},
-            {'params': conditioning_params, 'weight_decay': cwd},
-        ], lr=self.learning_rate)
+            scheduler = None
+            if self.use_lr_scheduler:
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode="min", factor=self.scheduler_factor,
+                    patience=self.scheduler_patience, min_lr=1e-6,
+                )
 
-        scheduler = None
-        if self.use_lr_scheduler:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode="min", factor=self.scheduler_factor,
-                patience=self.scheduler_patience, min_lr=1e-6,
-            )
+        # Restore optimizer/scheduler state from checkpoint if available
+        if getattr(self, '_resume_optimizer_state', None) is not None:
+            optimizer.load_state_dict(self._resume_optimizer_state)
+            del self._resume_optimizer_state
+            print("Restored optimizer state from checkpoint")
+        if getattr(self, '_resume_scheduler_state', None) is not None and scheduler is not None:
+            scheduler.load_state_dict(self._resume_scheduler_state)
+            del self._resume_scheduler_state
+            print("Restored scheduler state from checkpoint")
+
+        # Store on self so save methods can access them
+        self._optimizer = optimizer
+        self._scheduler = scheduler
+
         return optimizer, scheduler
 
     def _train_epoch(self, train_loader, optimizer, epoch, global_pbar=None):
@@ -305,6 +320,9 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
                 log_dict["validity"] = validity
                 log_dict["uniqueness"] = uniqueness
             wandb.log(log_dict)
+
+        # Save latest checkpoint every epoch
+        self._save_latest_checkpoint(current_epoch, avg_train_loss)
 
         return losses
 
@@ -409,6 +427,8 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
             "fitting_epoch": epoch,
             "fitting_loss": self.fitting_loss,
             "best_loss": loss,
+            "optimizer_state_dict": self._optimizer.state_dict() if getattr(self, '_optimizer', None) is not None else None,
+            "scheduler_state_dict": self._scheduler.state_dict() if getattr(self, '_scheduler', None) is not None else None,
         }
 
         torch.save(checkpoint, checkpoint_path)
@@ -417,6 +437,43 @@ class ScatteringGraphDIT(GraphDITMolecularGenerator):
         if wandb.run is not None:
             wandb.save(checkpoint_path)
             wandb.log({"best_loss": loss, "best_epoch": epoch})
+
+    def _save_latest_checkpoint(self, epoch, train_loss):
+        """Save latest checkpoint every epoch (overwrites previous)."""
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(self.checkpoint_dir, "checkpoint_latest.pt")
+
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "hyperparameters": {
+                "max_node": self.max_node,
+                "hidden_size": self.hidden_size,
+                "num_layer": self.num_layer,
+                "num_head": self.num_head,
+                "mlp_ratio": self.mlp_ratio,
+                "dropout": self.dropout,
+                "drop_condition": self.drop_condition,
+                "input_dim_X": self.input_dim_X,
+                "input_dim_E": self.input_dim_E,
+                "input_dim_y": self.input_dim_y,
+                "task_type": self.task_type,
+                "timesteps": self.timesteps,
+                "dataset_info": self.dataset_info,
+                "num_atom_types": getattr(self, 'num_atom_types', None),
+                "num_levels": getattr(self, 'num_levels', None),
+                "num_moments": getattr(self, 'num_moments', None),
+            },
+            "fitting_epoch": epoch,
+            "fitting_loss": self.fitting_loss,
+            "best_loss": train_loss,
+            "optimizer_state_dict": self._optimizer.state_dict() if getattr(self, '_optimizer', None) is not None else None,
+            "scheduler_state_dict": self._scheduler.state_dict() if getattr(self, '_scheduler', None) is not None else None,
+        }
+
+        torch.save(checkpoint, checkpoint_path)
+
+        if wandb.run is not None:
+            wandb.save(checkpoint_path)
 
 
     def fit(self, X_train, y_train, X_val=None, y_val=None, val_every_n_epochs=1, **kwargs):
@@ -643,9 +700,11 @@ if __name__ == "__main__":
     model.num_levels = num_levels
     model.num_moments = num_moments
 
-   # Stash checkpoint so _initialize_model can use it when called from fit()
+    # Stash checkpoint so _initialize_model can use it when called from fit()
     if checkpoint is not None:
         model._resume_checkpoint = checkpoint
+        model._resume_optimizer_state = checkpoint.get("optimizer_state_dict")
+        model._resume_scheduler_state = checkpoint.get("scheduler_state_dict")
 
     # =========================================================================
     # Train
