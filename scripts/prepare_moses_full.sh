@@ -25,6 +25,7 @@ set -e
 
 source molenv/bin/activate
 cd /sci/labs/orzuk/shaulytolk/GRASSY-Net
+export PYTHONPATH=/sci/labs/orzuk/shaulytolk/GRASSY-Net:$PYTHONPATH
 export XDG_CACHE_HOME=/tmp/cache_$SLURM_JOB_ID
 export PIP_NO_CACHE_DIR=1
 
