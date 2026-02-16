@@ -3,7 +3,7 @@
 #SBATCH --partition=catfish
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
-#SBATCH --time=240:00:00
+#SBATCH --time=168:00:00
 #SBATCH --output=moses_h1024_L6_%j.out
 #SBATCH --error=moses_h1024_L6_%j.err
 
