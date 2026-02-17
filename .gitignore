@@ -71,6 +71,15 @@ wandb/
 
 # Agent infrastructure (local only)
 .agents/
+.agents-backup-*/
+agents/
+memory/
+CLAUDE.md
+**/CLAUDE.md
+CHANGES.md
+**/CHANGES.md
+*_instructions.md
+**/*_instructions.md
 
 # Data files
 datasets/
