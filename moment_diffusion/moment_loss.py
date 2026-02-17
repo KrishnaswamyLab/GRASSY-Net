@@ -51,6 +51,13 @@ class MomentMatchingLoss(nn.Module):
         soft_X = F.softmax(pred_X_logits, dim=-1)  # [B, N, Xdim]
         soft_E = F.softmax(pred_E_logits, dim=-1)  # [B, N, N, Edim]
 
+        # Pad atom types if model outputs fewer than scattering expects
+        # (e.g. QM9: model has 4 active atom types, scattering computed with 5)
+        expected_atoms = self.soft_scattering.num_atom_types
+        if soft_X.shape[-1] < expected_atoms:
+            pad_size = expected_atoms - soft_X.shape[-1]
+            soft_X = F.pad(soft_X, (0, pad_size), value=0.0)
+
         # Compute scattering of predicted molecule
         S_pred = self.soft_scattering(soft_X, soft_E, node_mask)  # [B, scat_dim]
 
