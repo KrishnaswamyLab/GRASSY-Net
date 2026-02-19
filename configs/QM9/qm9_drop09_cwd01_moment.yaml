@@ -27,7 +27,7 @@ model:
   cross_attn_bottleneck: null
 
 training:
-  epochs: 1000
+  epochs: 2000
   batch_size: 128
   learning_rate: 1.0e-4
   l1_lambda: 0.0
@@ -44,7 +44,7 @@ checkpoint:
   save_dir: "./checkpoints/qm9/drop09_cwd01_moment"
   save_best: true
   save_every_n_epochs: 50
-  resume_from: null
+  resume_from: "./checkpoints/qm9/drop09_cwd01_moment/checkpoint_latest.pt"
 
 logging:
   wandb:
