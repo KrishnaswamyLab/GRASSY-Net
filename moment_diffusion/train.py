@@ -118,17 +118,6 @@ class ScatteringTransformerAdapter(torch.nn.Module):
             log_dict["train_l1_penalty"] = l1_penalty.item() if isinstance(l1_penalty, torch.Tensor) else l1_penalty
         if self.moment_loss_module is not None:
             log_dict["train_moment_loss"] = moment_loss_raw_val
-        # One-time gradient probe: register backward hooks on cross_attn params at step 0
-        # to verify moment loss gradients reach them. Safe to remove after confirming.
-        if self.step == 0 and self.moment_loss_module is not None:
-            for name, param in self.denoiser.named_parameters():
-                if 'cross_attn' in name:
-                    def _make_hook(n):
-                        def _hook(grad):
-                            print(f"[moment_grad_probe] {n}: grad_norm={grad.norm().item():.6e}", flush=True)
-                        return _hook
-                    param.register_hook(_make_hook(name))
-            print("[moment_grad_probe] Hooks registered. Grad norms will print after first backward.", flush=True)
         wandb.log(log_dict)
         self.step += 1
 
